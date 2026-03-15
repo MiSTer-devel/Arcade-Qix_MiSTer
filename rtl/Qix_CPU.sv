@@ -322,14 +322,25 @@ end
 // ---------------------------------------------------------------------------
 // CPU data bus read mux — default $FF for open-bus / unimplemented reads
 // ---------------------------------------------------------------------------
+// assign cpu_Din =
+//     shared_cs  ? shared_dout   :
+//     local_cs   ? local_ram_dout:
+//     sndpia_cs  ? sndpia_dout   :
+//     pia0_cs    ? pia0_dout     :
+//     pia1_cs    ? pia1_dout     :
+//     pia2_cs    ? pia2_dout     :
+//     rom_cs     ? rom_dout      :
+//     8'hFF;                          // acia_cs, firq_range, open bus
+
 assign cpu_Din =
     shared_cs  ? shared_dout   :
     local_cs   ? local_ram_dout:
+    acia_cs    ? 8'h00         :
     sndpia_cs  ? sndpia_dout   :
     pia0_cs    ? pia0_dout     :
     pia1_cs    ? pia1_dout     :
     pia2_cs    ? pia2_dout     :
     rom_cs     ? rom_dout      :
-    8'hFF;                          // acia_cs, firq_range, open bus
+    8'hFF;
 
 endmodule

@@ -350,17 +350,17 @@ end
 //////////////////  Arcade Buttons/Interfaces   ///////////////////////////
 
 // directly from joystick_0
-wire m_up1     = btn_up    | joystick_0[3];
-wire m_down1   = btn_down  | joystick_0[2];
-wire m_left1   = btn_left  | joystick_0[1];
-wire m_right1  = btn_right | joystick_0[0];
-wire m_btn1_p1 = btn_fire  | joystick_0[4];
-wire m_btn2_p1 = btn_fire2 | joystick_0[5];
-wire m_coin1   = btn_coin1 | joystick_0[6];
-wire m_start1  = btn_1p_start | joystick_0[7];
-wire m_start2  = btn_2p_start | joystick_0[8];
-wire m_pause   = btn_pause | joystick_0[9];
-wire m_service = btn_service;
+wire m_up1     = btn_up        | joystick_0[3];
+wire m_down1   = btn_down      | joystick_0[2];
+wire m_left1   = btn_left      | joystick_0[1];
+wire m_right1  = btn_right     | joystick_0[0];
+wire m_btn1_p1 = btn_fire      | joystick_0[4];
+wire m_btn2_p1 = btn_fire2     | joystick_0[5];
+wire m_coin1   = btn_coin1     | joystick_0[6];
+wire m_start1  = btn_1p_start  | joystick_0[7];
+wire m_start2  = btn_2p_start  | joystick_0[8];
+wire m_pause   = btn_pause     | joystick_0[9];
+wire m_service = btn_service   | joystick_0[8];
 wire m_service2 = btn_service2;
 wire m_service3 = btn_service3;
 wire m_service4 = btn_service4;
@@ -460,7 +460,7 @@ Qix QIX_inst
     .ioctl_data(ioctl_dout),
     .ioctl_index(ioctl_index),
 
-	.pause(pause_cpu),
+	.pause(1'b0), // (pause_cpu),
 
 	.hs_address(hs_address),
 	.hs_data_out(hs_data_out),

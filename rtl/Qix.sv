@@ -158,6 +158,9 @@ always @(posedge clk_20m) begin
     end else if (!vsync_enable) begin
         vsync_delay <= vsync_delay + 24'd1;
         if (vsync_delay == 24'd16_777_215)  // ~0.84 sec
+//        if (vsync_delay == 24'd8_400_000)     // ~0.42 sec
+//        if (vsync_delay == 24'd5_000_000)     // ~0.25 sec
+//        if (vsync_delay == 24'd2_000_000)     // ~0.10 sec
 //        if (vsync_delay == 24'd1_000_000)     // ~0.05 sec
             vsync_enable <= 1'b1;
     end
