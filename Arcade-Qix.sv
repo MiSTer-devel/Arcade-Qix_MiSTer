@@ -203,8 +203,11 @@ assign AUDIO_MIX = 0; // no mix, true stereo
 
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
-assign LED_USER  = ioctl_download;
+//assign LED_USER  = ioctl_download;
+assign LED_USER  = ioctl_download | shared_debug_led_w;
 assign BUTTONS = 0;
+
+wire shared_debug_led_w;
 
 ///////////////////////////////////////////////////
 
@@ -470,6 +473,7 @@ Qix QIX_inst
     .ioctl_index(ioctl_index),
 
 	.pause(1'b0), // (pause_cpu),
+	.shared_debug_led(shared_debug_led_w),
 
 	.hs_address(hs_address),
 	.hs_data_out(hs_data_out),

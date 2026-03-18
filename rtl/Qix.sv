@@ -62,7 +62,8 @@ module Qix (
     output [7:0]  hs_data_out,
     input         hs_write,
 
-    input         pause
+    input         pause,
+    output reg    shared_debug_led
 );
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,14 @@ dpram_dc #(.widthad_a(10)) shared_ram_inst (
     .q_b        (vid_sh_dout)
 );
 
+// Debug: light LED when port A reads $02 from shared RAM offset $1F1 ($83F1)
+always @(posedge clk_20m) begin
+    if (reset)
+        shared_debug_led <= 1'b0;
+    else if (vid_sh_we)
+        shared_debug_led <= 1'b1;
+end
+
 // ---------------------------------------------------------------------------
 // ROM ioctl address-range dispatch (concatenated ROM, all ioctl_index == 0)
 //   $00000-$03FFF : Data CPU ROM  (16KB)
@@ -160,29 +169,7 @@ end
 wire data_firq_n  = ~data_firq_latch;
 wire video_firq_n = ~video_firq_latch;
 
-// Delay VSYNC to Data CPU until CRTC is programmed.
-reg [23:0] vsync_delay;
-reg        vsync_enable;
-always @(posedge clk_20m) begin
-    if (reset) begin
-        vsync_delay  <= 24'd0;
-        vsync_enable <= 1'b0;
-    end else if (!vsync_enable) begin
-        vsync_delay <= vsync_delay + 24'd1;
-        if (vsync_delay == 24'd16_777_215)  // ~0.84 sec
-//        if (vsync_delay == 24'd8_400_000)     // ~0.42 sec
-//        if (vsync_delay == 24'd5_000_000)     // ~0.25 sec
-//        if (vsync_delay == 24'd2_000_000)     // ~0.10 sec
-//        if (vsync_delay == 24'd1_000_000)     // ~0.05 sec
-            vsync_enable <= 1'b1;
-    end
-end
-
 wire crtc_vsync_out;
-wire crtc_vsync_gated = vsync_enable ? crtc_vsync_out : 1'b0;
-
-// wire crtc_vsync_out;
-// wire crtc_vsync_gated = crtc_vsync_out;
 
 // ---------------------------------------------------------------------------
 // Sound PIA signal routing
@@ -234,7 +221,7 @@ Qix_CPU cpu_board (
     .in0_input       (8'hFF),
     .p2_input        (p2_pia),
 
-    .crtc_vsync      (crtc_vsync_gated),
+    .crtc_vsync      (crtc_vsync_out),
 
     .snd_data_out    (snd_cmd),
     .snd_vol_out     (snd_vol),
