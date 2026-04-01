@@ -23,8 +23,9 @@ module mc6809e(
     output  [7:0] DOut,
     output  [15:0] ADDR,
     output  RnW,
-    input   E,
-    input   Q,
+    input   CLK_ROOT,
+    input   CE_E_FALL,
+    input   CE_Q_FALL,
     output  BS,
     output  BA,
     input   nIRQ,
@@ -33,16 +34,17 @@ module mc6809e(
     output  AVMA,
     output  BUSY,
     output  LIC,
-    input 	nHALT,	 
+    input   nHALT,
     input   nRESET
 
     );
 
+    wire [111:0] regdata;
 
-
-mc6809i cpucore (.D(D), .DOut(DOut), .ADDR(ADDR), .RnW(RnW), .E(E), .Q(Q), .BS(BS), .BA(BA), .nIRQ(nIRQ), .nFIRQ(nFIRQ), 
-                .nNMI(nNMI), .AVMA(AVMA), .BUSY(BUSY), .LIC(LIC), .nHALT(nHALT), .nRESET(nRESET), .nDMABREQ(1'b1)
+    mc6809is cpucore (.CLK(CLK_ROOT), .fallE_en(CE_E_FALL), .fallQ_en(CE_Q_FALL),
+                .D(D), .DOut(DOut), .ADDR(ADDR), .RnW(RnW), .BS(BS), .BA(BA),
+                .nIRQ(nIRQ), .nFIRQ(nFIRQ), .nNMI(nNMI), .AVMA(AVMA), .BUSY(BUSY),
+                .LIC(LIC), .nHALT(nHALT), .nRESET(nRESET), .nDMABREQ(1'b1), .RegData(regdata)
                 );
-
 
 endmodule

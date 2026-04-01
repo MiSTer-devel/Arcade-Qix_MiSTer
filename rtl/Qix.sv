@@ -78,6 +78,12 @@ always @(posedge clk_20m) clk_div <= clk_div + 4'd1;
 wire cpu_E = clk_div[3];
 wire cpu_Q = clk_div[3] ^ clk_div[2];
 
+reg ce_E_fall, ce_Q_fall;
+always @(negedge clk_20m) begin
+    ce_E_fall <= (clk_div == 4'b1111);
+    ce_Q_fall <= (clk_div == 4'b1011);
+end
+
 // ---------------------------------------------------------------------------
 // Shared 1KB dual-port RAM (port A = data CPU, port B = video CPU)
 // Explicit dpram_dc to guarantee M10K inference.
@@ -149,7 +155,7 @@ wire vid_firq_ack;       // video CPU accessed $8C01 (pulse)
 //   MODE 4: Alternating execution (MAME-style interleave)
 // Change this parameter and recompile to test each mode:
 // ---------------------------------------------------------------------------
-localparam FIRQ_DELAY_MODE = 5;  // <-- CHANGE THIS TO TEST: 0,1,2,3,4
+localparam FIRQ_DELAY_MODE = 0;  // <-- CHANGE THIS TO TEST: 0,1,2,3,4
 
 reg data_firq_latch;
 reg video_firq_latch;
@@ -295,8 +301,8 @@ wire [7:0] p2_pia   = {p2_btn1, 3'b111,
 Qix_CPU cpu_board (
     .clk_20m         (clk_20m),
     .reset           (reset),
-    .E               (cpu_E),
-    .Q               (cpu_Q),
+    .ce_E_fall       (ce_E_fall),
+    .ce_Q_fall       (ce_Q_fall),
 
     .shared_addr     (cpu_sh_addr),
     .shared_din      (cpu_sh_din),
@@ -326,7 +332,7 @@ Qix_CPU cpu_board (
     .ioctl_data      (ioctl_data),
     .ioctl_wr        (cpu_ioctl_wr),
 
-    .pause           (pause)
+    .pause           (pause | vid_sh_cs)
 );
 
 // ---------------------------------------------------------------------------
@@ -335,8 +341,8 @@ Qix_CPU cpu_board (
 Qix_Video video_board (
     .clk_20m         (clk_20m),
     .reset           (reset),
-    .E               (cpu_E),
-    .Q               (cpu_Q),
+    .ce_E_fall       (ce_E_fall),
+    .ce_Q_fall       (ce_Q_fall),
 
     .shared_addr     (vid_sh_addr),
     .shared_dout     (vid_sh_din),    // video CPU write data → shared RAM port B
@@ -367,7 +373,7 @@ Qix_Video video_board (
     .hs_data_in      (hs_data_in),
     .hs_write        (hs_write),
 
-    .pause           (pause),
+    .pause           (pause | cpu_sh_cs),
     .flip            (flip)
 );
 

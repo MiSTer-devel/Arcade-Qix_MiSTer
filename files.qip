@@ -14,6 +14,7 @@ set_global_assignment -name VERILOG_FILE rtl/nvram.v
 
 set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809e.v
 set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809i.v
+set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809is.v
 
 set_global_assignment -name VHDL_FILE rtl/cpu/m6800.vhd
 set_global_assignment -name VHDL_FILE rtl/cpu/mc6845.vhd

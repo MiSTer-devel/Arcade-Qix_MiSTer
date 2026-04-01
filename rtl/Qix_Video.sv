@@ -20,8 +20,8 @@
 module Qix_Video (
     input         clk_20m,
     input         reset,
-    input         E,            // 6809E E clock (~1.25 MHz), from top-level
-    input         Q,            // 6809E Q clock (90° leading E)
+    input         ce_E_fall,    // 6809 E falling edge enable (1 clk_20m pulse)
+    input         ce_Q_fall,    // 6809 Q falling edge enable (1 clk_20m pulse)
 
     // Shared RAM interface (dual-port RAM lives in Qix.sv)
     output [9:0]  shared_addr,
@@ -69,12 +69,13 @@ wire [7:0]  cpu_Dout;
 wire        cpu_RnW;
 
 mc6809e video_cpu (
-    .D      (cpu_Din),
-    .DOut   (cpu_Dout),
-    .ADDR   (cpu_A),
-    .RnW    (cpu_RnW),
-    .E      (E),
-    .Q      (Q),
+    .D          (cpu_Din),
+    .DOut       (cpu_Dout),
+    .ADDR       (cpu_A),
+    .RnW        (cpu_RnW),
+    .CLK_ROOT   (clk_20m),
+    .CE_E_FALL  (ce_E_fall),
+    .CE_Q_FALL  (ce_Q_fall),
     .nIRQ   (1'b1),
     .nFIRQ  (video_firq_n),  // use internal SR latch, not raw pulse input
     .nNMI   (1'b1),
@@ -90,9 +91,7 @@ mc6809e video_cpu (
 // ---------------------------------------------------------------------------
 // Write strobe: one-cycle pulse on falling edge of E while RnW is low
 // ---------------------------------------------------------------------------
-reg E_prev;
-always @(posedge clk_20m) E_prev <= E;
-wire cpu_E_fall = E_prev & ~E;
+wire cpu_E_fall = ce_E_fall;
 wire cpu_wr     = cpu_E_fall & ~cpu_RnW;
 
 // ---------------------------------------------------------------------------

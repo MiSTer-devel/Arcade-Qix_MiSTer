@@ -1,0 +1,15 @@
+CAPI=2:
+name: cavnex:mc6809:mc6809e:0.1.0
+
+filesets:
+  rtl:
+    files:
+      - mc6809i.v
+      - mc6809e.v
+    file_type: verilogSource
+
+
+targets:
+  default:
+    filesets: [rtl]
+    toplevel: mc6809e

@@ -16,8 +16,8 @@
 module Qix_CPU (
     input         clk_20m,
     input         reset,
-    input         E,              // shared 6809 E clock
-    input         Q,              // shared 6809 Q clock
+    input         ce_E_fall,      // 6809 E falling edge enable (1 clk_20m pulse)
+    input         ce_Q_fall,      // 6809 Q falling edge enable (1 clk_20m pulse)
 
     // Shared RAM — port A of dual-port RAM in Qix.sv
     output [9:0]  shared_addr,
@@ -67,9 +67,7 @@ wire        n_irq;      // active-low IRQ to 6809E, driven by sndPIA0
 // ---------------------------------------------------------------------------
 // Write strobe: one-cycle pulse on falling edge of E while RnW is low
 // ---------------------------------------------------------------------------
-reg E_prev;
-always @(posedge clk_20m) E_prev <= E;
-wire cpu_E_fall = E_prev & ~E;          // 1-cycle pulse at every E falling edge
+wire cpu_E_fall = ce_E_fall;
 wire cpu_wr     = cpu_E_fall & ~cpu_RnW;
 
 // ---------------------------------------------------------------------------
@@ -120,12 +118,13 @@ assign data_firq_ack = firq_ack_pulse;
 // 6809E Data CPU
 // ---------------------------------------------------------------------------
 mc6809e data_cpu (
-    .D      (cpu_Din),
-    .DOut   (cpu_Dout),
-    .ADDR   (cpu_A),
-    .RnW    (cpu_RnW),
-    .E      (E),
-    .Q      (Q),
+    .D          (cpu_Din),
+    .DOut       (cpu_Dout),
+    .ADDR       (cpu_A),
+    .RnW        (cpu_RnW),
+    .CLK_ROOT   (clk_20m),
+    .CE_E_FALL  (ce_E_fall),
+    .CE_Q_FALL  (ce_Q_fall),
     .nIRQ   (n_irq),
     .nFIRQ  (data_firq_n),
     .nNMI   (1'b1),

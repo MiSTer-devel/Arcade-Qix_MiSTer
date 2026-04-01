@@ -638,7 +638,7 @@ begin
     begin
         CpuState <= CPUSTATE_RESET; 
         NMIMask <= 1'b1; // Mask NMI until S is loaded.
-        NMIClear <= 1'b0; // Mark us as not having serviced NMI
+        NMIClear <= 1'b1; // Mark us as having serviced NMI because we're resetting
     end
 end
 
@@ -3612,8 +3612,10 @@ begin
                 rAVMA = 1'b1;
                 rLIC = 1'b1;
             end
-            else
+            else if (RnWOut)
                 rAVMA = 1'b0;
+            else
+                rAVMA = 1'b1;
             CpuState_nxt  = NextState;
         end                                           
     end

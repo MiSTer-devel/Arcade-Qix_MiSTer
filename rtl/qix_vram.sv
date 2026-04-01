@@ -77,11 +77,14 @@ assign display_dout = disp_q;
 // ---------------------------------------------------------------------------
 // Scanline latch — capture on rising edge of crtc_de
 // ---------------------------------------------------------------------------
-reg crtc_de_r;
-always @(posedge clk) begin
-    crtc_de_r <= crtc_de;
-    if (crtc_de && !crtc_de_r)
-        scanline_latch <= {crtc_ma[9:5], crtc_ra[2:0]};
-end
+//reg crtc_de_r;
+//always @(posedge clk) begin
+//    crtc_de_r <= crtc_de;
+//    if (crtc_de && !crtc_de_r)
+//        scanline_latch <= {crtc_ma[9:5], crtc_ra[2:0]};
+//end
+
+
+assign scanline_latch = {crtc_ma[9:5], crtc_ra[2:0]};
 
 endmodule
