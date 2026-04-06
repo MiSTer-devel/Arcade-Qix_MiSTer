@@ -87,10 +87,15 @@ wire rom_cs         = (cpu_A >= 16'hA000);            // $A000-$FFFF (24KB)
 
 // PIA chip-select: single-cycle pulse at E-fall so the synchronous PIA
 // fires exactly once per bus cycle regardless of E-cycle width.
-wire sndpia_en = cpu_E_fall & sndpia_cs;
-wire pia0_en   = cpu_E_fall & pia0_cs;
-wire pia1_en   = cpu_E_fall & pia1_cs;
-wire pia2_en   = cpu_E_fall & pia2_cs;
+// wire sndpia_en = cpu_E_fall & sndpia_cs;
+// wire pia0_en   = cpu_E_fall & pia0_cs;
+// wire pia1_en   = cpu_E_fall & pia1_cs;
+// wire pia2_en   = cpu_E_fall & pia2_cs;
+
+wire sndpia_en = sndpia_cs;
+wire pia0_en   = pia0_cs;
+wire pia1_en   = pia1_cs;
+wire pia2_en   = pia2_cs;
 
 // ---------------------------------------------------------------------------
 // FIRQ access pulses (from schematic Figure 13, U7/U8):
@@ -204,7 +209,7 @@ assign snd_irq_to_snd = sndpia_ca2_o;
 assign flip_screen    = sndpia_cb2_o;
 
 // IRQ to data CPU: active-low merge of sndPIA0 IRQA and IRQB
-assign n_irq = ~(sndpia_irqa | sndpia_irqb);
+assign n_irq = ~(sndpia_irqa | sndpia_irqb | pia0_irqa | pia0_irqb | pia1_irqa | pia1_irqb | pia2_irqa | pia2_irqb);
 
 // ---------------------------------------------------------------------------
 // PIA0 ($9400-$97FF) — player 1 joystick + coin inputs

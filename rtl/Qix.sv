@@ -332,7 +332,8 @@ Qix_CPU cpu_board (
     .ioctl_data      (ioctl_data),
     .ioctl_wr        (cpu_ioctl_wr),
 
-    .pause           (pause | vid_sh_cs)
+    .pause           (pause)
+//    .pause           (pause | vid_sh_cs)
 );
 
 // ---------------------------------------------------------------------------
@@ -373,7 +374,8 @@ Qix_Video video_board (
     .hs_data_in      (hs_data_in),
     .hs_write        (hs_write),
 
-    .pause           (pause | cpu_sh_cs),
+    .pause           (pause),
+//    .pause           (pause | cpu_sh_cs),
     .flip            (flip)
 );
 
