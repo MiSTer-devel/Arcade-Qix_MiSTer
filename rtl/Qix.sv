@@ -79,7 +79,7 @@ wire cpu_E = clk_div[3];
 wire cpu_Q = clk_div[3] ^ clk_div[2];
 
 reg ce_E_fall, ce_Q_fall;
-always @(negedge clk_20m) begin
+always @(posedge clk_20m) begin
     ce_E_fall <= (clk_div == 4'b1111);
     ce_Q_fall <= (clk_div == 4'b1011);
 end

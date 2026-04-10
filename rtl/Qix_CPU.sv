@@ -194,7 +194,7 @@ pia6821 sndpia0 (
     .ca2_i    (1'b1),
     .ca2_o    (sndpia_ca2_o),
     .ca2_oe   (sndpia_ca2_oe),
-    .pb_i     (8'h00),
+    .pb_i     (8'hFF),
     .pb_o     (sndpia_pb_o),
     .pb_oe    (sndpia_pb_oe),
     .cb1      (crtc_vsync),  // (1'b0),
