@@ -201,6 +201,7 @@ qix_vram vram (
     .latch_addr_hi  (vram_latch_addr_hi),
     .latch_addr_lo  (vram_latch_addr_lo),
     .latch_we       (vram_latch_cs & cpu_wr),
+    .latch_re       (vram_latch_cs & ~cpu_wr),
     .latch_din      (cpu_Dout),
     .latch_dout     (vram_latch_dout),
 

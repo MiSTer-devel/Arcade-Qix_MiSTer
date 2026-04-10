@@ -20,6 +20,7 @@ module qix_vram (
     input  [7:0]      latch_addr_hi,
     input  [7:0]      latch_addr_lo,
     input             latch_we,
+    input             latch_re,
     input  [7:0]      latch_din,
     output [7:0]      latch_dout,
 
@@ -40,7 +41,7 @@ module qix_vram (
 wire [15:0] cpu_direct_full = {latch_addr_hi[7], addr};
 wire [15:0] cpu_latch_full  = {latch_addr_hi, latch_addr_lo};
 
-wire [15:0] cpu_addr_mux  = latch_we ? cpu_latch_full  : cpu_direct_full;
+wire [15:0] cpu_addr_mux  = (latch_we | latch_re) ? cpu_latch_full  : cpu_direct_full;
 wire [7:0]  cpu_din_mux   = latch_we ? latch_din        : din;
 wire        cpu_we_any    = we | latch_we;
 
