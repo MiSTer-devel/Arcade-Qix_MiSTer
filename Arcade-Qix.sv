@@ -292,13 +292,32 @@ wire CLK_40M;
 wire CLK_20M;
 wire locked;
 
+wire [63:0] reconfig_to_pll;
+wire [63:0] reconfig_from_pll;
+
 pll pll
 (
     .refclk(CLK_50M),
     .rst(0),
     .outclk_0(CLK_40M),
     .outclk_1(CLK_20M),
-    .locked(locked)
+    .locked(locked),
+    .reconfig_to_pll(reconfig_to_pll),
+    .reconfig_from_pll(reconfig_from_pll)
+);
+
+pll_cfg pll_cfg
+(
+    .mgmt_clk(CLK_50M),
+    .mgmt_reset(0),
+    .mgmt_waitrequest(),
+    .mgmt_read(0),
+    .mgmt_readdata(),
+    .mgmt_write(0),
+    .mgmt_address(0),
+    .mgmt_writedata(0),
+    .reconfig_to_pll(reconfig_to_pll),
+    .reconfig_from_pll(reconfig_from_pll)
 );
 
 assign CLK_VIDEO = CLK_40M;   // HDMI needs the 40 MHz reference

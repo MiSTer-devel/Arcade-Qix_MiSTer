@@ -49,6 +49,15 @@ wire        snd_rw;            // 1 = read, 0 = write (active-high read, directl
 wire        snd_vma;           // 1 = valid memory address (active bus cycle)
 wire        snd_wr = ~snd_rw;  // convenience: 1 = write
 
+// One-shot power-on reset for cpu68. Fires once at startup to ensure
+// the CPU fetches the reset vector. Uses a 2-bit counter with explicit
+// initial value — Quartus respects initial values on registers even with
+// ALLOW_POWER_UP_DONT_CARE when they are part of active logic.
+reg [1:0] snd_por = 2'b11;
+always @(posedge clk_20m)
+    if (snd_por != 2'b00) snd_por <= snd_por - 2'd1;
+wire snd_rst = (snd_por != 2'b00);
+
 // Fractional clock enable: 921.6 kHz from 20 MHz (exact average)
 // Real hardware: 7.3728 MHz xtal / 2 = 3.6864 MHz, M6802 internal /4 = 921.6 kHz
 reg [24:0] snd_acc;
@@ -70,12 +79,20 @@ wire sndpia2_cs_addr = (snd_A[15:13] == 3'b001);   // $2000-$3FFF
 wire sndpia1_cs_addr = (snd_A[15:14] == 2'b01);    // $4000-$7FFF
 wire rom_cs          = (snd_A >= 16'hD000);        // $D000-$FFFF (12KB)
 
-// PIA enables: qualified by VMA only. The PIA write process clocks on the
-// rising edge (clk='1') while cpu68 advances on the falling edge (clk='0'),
-// so the PIA naturally samples cs mid-cycle. Adding snd_cen here would
-// mis-time the cs pulse relative to when the CPU address bus is valid.
-wire sndpia2_en = snd_vma & sndpia2_cs_addr;
-wire sndpia1_en = snd_vma & sndpia1_cs_addr;
+// PIA enables: single-cycle pulse, one cycle AFTER snd_cen.
+//
+// cpu68 advances on negedge when snd_cen=1 (hold=0), setting up address/rw.
+// snd_cen_d fires on the next cycle, giving the PIA exactly one posedge
+// (for writes) and one negedge (for read side-effects like IRQ clearing)
+// per CPU bus cycle. Without this gating, vma/rw stay asserted during hold
+// and the PIA sees ~21 spurious clk edges per CPU cycle — corrupting
+// portb_write strobes, CA2 handshake timing, and clearing IRQ flags before
+// the CPU can service them.
+reg snd_cen_d;
+always @(posedge clk_20m) snd_cen_d <= snd_cen;
+
+wire sndpia2_en = snd_cen_d & snd_vma & sndpia2_cs_addr;
+wire sndpia1_en = snd_cen_d & snd_vma & sndpia1_cs_addr;
 
 // ---------------------------------------------------------------------------
 // 6802 internal RAM — 128 bytes ($0000-$007F)
@@ -106,7 +123,7 @@ wire snd_irq;
 
 cpu68 audio_cpu (
     .clk      (clk_20m),
-    .rst      (reset),
+    .rst      (snd_rst),
     .rw       (snd_rw),
     .vma      (snd_vma),
     .address  (snd_A),
@@ -136,7 +153,7 @@ wire       sndpia1_irqa,  sndpia1_irqb;
 
 pia6821 sndpia1 (
     .clk      (clk_20m),
-    .rst      (reset),
+    .rst      (snd_rst),
     .cs       (sndpia1_en),
     .rw       (snd_rw),
     .addr     (snd_A[1:0]),
@@ -171,7 +188,7 @@ wire       sndpia2_irqa, sndpia2_irqb;
 
 pia6821 sndpia2 (
     .clk      (clk_20m),
-    .rst      (reset),
+    .rst      (snd_rst),
     .cs       (sndpia2_en),
     .rw       (snd_rw),
     .addr     (snd_A[1:0]),
@@ -255,12 +272,13 @@ end
 wire [7:0] vol_l = vol_table[vol_data[7:4]];
 wire [7:0] vol_r = vol_table[vol_data[3:0]];
 
-// 16-bit unsigned intermediate: (0-255) × (0-255) >> 8 → 0-254 in [7:0]
-wire [15:0] dac_l_scaled = ({8'd0, dac_val} * {8'd0, vol_l}) >> 8;
-wire [15:0] dac_r_scaled = ({8'd0, dac_val} * {8'd0, vol_r}) >> 8;
+// DAC output: unsigned 8-bit centered at $80 → signed 16-bit with volume
+// MAME: output = (data - 128) * 128, scaled by volume resistor network
+wire signed [8:0]  dac_centered  = $signed({1'b0, dac_val}) - 9'sh80;
+wire signed [17:0] dac_l_scaled  = dac_centered * $signed({2'b0, vol_l});
+wire signed [17:0] dac_r_scaled  = dac_centered * $signed({2'b0, vol_r});
 
-// Unsigned 8-bit → signed 16-bit: shift to upper byte, subtract midpoint
-assign audio_l = {dac_l_scaled[7:0], 8'h00} - 16'h8000;
-assign audio_r = {dac_r_scaled[7:0], 8'h00} - 16'h8000;
+assign audio_l = dac_l_scaled[16:1];
+assign audio_r = dac_r_scaled[16:1];
 
 endmodule

@@ -86,17 +86,20 @@ wire pia1_cs        = (cpu_A[15:10] == 6'b10_0110);   // $9800-$9BFF
 wire pia2_cs        = (cpu_A[15:10] == 6'b10_0111);   // $9C00-$9FFF
 wire rom_cs         = (cpu_A >= 16'hA000);            // $A000-$FFFF (24KB)
 
-// PIA chip-select: single-cycle pulse at E-fall so the synchronous PIA
-// fires exactly once per bus cycle regardless of E-cycle width.
-// wire sndpia_en = cpu_E_fall & sndpia_cs;
-// wire pia0_en   = cpu_E_fall & pia0_cs;
-// wire pia1_en   = cpu_E_fall & pia1_cs;
-// wire pia2_en   = cpu_E_fall & pia2_cs;
+// PIA chip-select: single-cycle pulse, one cycle AFTER E-fall.
+//
+// mc6809e updates address/rw at CE_E_FALL. Delaying by one 20MHz cycle
+// ensures the PIA sees cs for exactly one posedge (write) and one negedge
+// (read side-effects / IRQ clearing) per bus cycle. Without this, cs is
+// held for the entire E-cycle (~16 posedges at 20 MHz), causing spurious
+// PIA writes, missed IRQs, and corrupted CA2/CB2 handshake strobes.
+reg ce_E_fall_d;
+always @(posedge clk_20m) ce_E_fall_d <= cpu_E_fall;
 
-wire sndpia_en = sndpia_cs;
-wire pia0_en   = pia0_cs;
-wire pia1_en   = pia1_cs;
-wire pia2_en   = pia2_cs;
+wire sndpia_en = ce_E_fall_d & sndpia_cs;
+wire pia0_en   = ce_E_fall_d & pia0_cs;
+wire pia1_en   = ce_E_fall_d & pia1_cs;
+wire pia2_en   = ce_E_fall_d & pia2_cs;
 
 // ---------------------------------------------------------------------------
 // FIRQ access pulses (from schematic Figure 13, U7/U8):
