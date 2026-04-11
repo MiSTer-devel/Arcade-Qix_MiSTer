@@ -79,20 +79,18 @@ wire sndpia2_cs_addr = (snd_A[15:13] == 3'b001);   // $2000-$3FFF
 wire sndpia1_cs_addr = (snd_A[15:14] == 2'b01);    // $4000-$7FFF
 wire rom_cs          = (snd_A >= 16'hD000);        // $D000-$FFFF (12KB)
 
-// PIA enables: single-cycle pulse, one cycle AFTER snd_cen.
-//
-// cpu68 advances on negedge when snd_cen=1 (hold=0), setting up address/rw.
-// snd_cen_d fires on the next cycle, giving the PIA exactly one posedge
-// (for writes) and one negedge (for read side-effects like IRQ clearing)
-// per CPU bus cycle. Without this gating, vma/rw stay asserted during hold
-// and the PIA sees ~21 spurious clk edges per CPU cycle — corrupting
-// portb_write strobes, CA2 handshake timing, and clearing IRQ flags before
-// the CPU can service them.
-reg snd_cen_d;
-always @(posedge clk_20m) snd_cen_d <= snd_cen;
+// ---------------------------------------------------------------------------
+// PIA enables
+// ---------------------------------------------------------------------------
+// cpu68 sets up bus on negedge when snd_cen=1.
+// snd_cen_negedge captures that on the same negedge → cs goes high on the
+// immediately following posedge (PIA write) AND the following negedge
+// (PIA control logic). One clean pulse per CPU bus cycle.
+reg snd_cen_negedge;
+always @(negedge clk_20m) snd_cen_negedge <= snd_cen;
 
-wire sndpia2_en = snd_cen_d & snd_vma & sndpia2_cs_addr;
-wire sndpia1_en = snd_cen_d & snd_vma & sndpia1_cs_addr;
+wire sndpia2_en = snd_cen_negedge & snd_vma & sndpia2_cs_addr;
+wire sndpia1_en = snd_cen_negedge & snd_vma & sndpia1_cs_addr;
 
 // ---------------------------------------------------------------------------
 // 6802 internal RAM — 128 bytes ($0000-$007F)
