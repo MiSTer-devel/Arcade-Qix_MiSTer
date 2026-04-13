@@ -19,6 +19,8 @@ module Qix (
     input         clk_20m,
     input         reset,
 
+    input  [7:0]  game_id,     // 00=Qix 01=ComplexX 02=SpaceDungeon 03=Kram 04=ZooKeep 05=Slither 06=ElecYoYo
+
     // Player inputs (active-low)
     input  [1:0]  coin,
     input  [1:0]  start_buttons,
@@ -284,20 +286,88 @@ wire        snd_irq_snd2cpu;     // Qix_Sound sndPIA1 CA2 → Qix_CPU sndPIA0 CA
 wire        flip;                // Qix_CPU sndPIA0 CB2 → Qix_Video flip
 
 // ---------------------------------------------------------------------------
-// PIA input assembly — EXACT match to schematic Figure 16
+// PIA input assembly — per-game, sourced from MAME qix.cpp INPUT_PORTS
 //
-// PIA0 port A (U11 PA): [7]=Fire1 [6]=Start1 [5]=Start2 [4]=Spare/Button2 [3:0]={R,L,D,U}
-// PIA0 port B (U11 PB): [7]=Tilt [6]=Coin3 [5]=Coin2 [4]=Coin1 [3:0]={svc4,svc3,svc2,svc1}
-// PIA2 port A (U30 PA): [7]=Fire2 [6:4]=Spare [3:0]={R,L,D,U}
+// Joystick bit order from wrapper: p1_joystick = {R,L,D,U} = [3:2:1:0]
+// PIA byte bits [3:0] need L,D,R,U order = [2],[1],[3],[0]
+//
+// game_id: 00=Qix/Qix2  01=ComplexX  02=SpaceDungeon
+//          03=Kram       04=ZooKeep   05=Slither  06=ElecYoYo
 // ---------------------------------------------------------------------------
 
 wire [7:0] coin_pia = {1'b1, 1'b1, coin[1], coin[0], service4, service3, service2, service};
 
-wire [7:0] p1_pia   = {p1_btn1, start_buttons[0], start_buttons[1], p1_btn2,
-                        p1_joystick[2], p1_joystick[1], p1_joystick[3], p1_joystick[0]};  // L,D,R,U → PIA [3:0]
+// Joystick nibble shorthand (active-low, L/D/R/U → PIA [3:0])
+wire [3:0] p1_joy_pia = {p1_joystick[2], p1_joystick[1], p1_joystick[3], p1_joystick[0]};
+wire [3:0] p2_joy_pia = {p2_joystick[2], p2_joystick[1], p2_joystick[3], p2_joystick[0]};
 
-wire [7:0] p2_pia   = {p2_btn1, 3'b111,
-                        p2_joystick[2], p2_joystick[1], p2_joystick[3], p2_joystick[0]};  // same
+reg [7:0] p1_pia;
+reg [7:0] p2_pia;
+reg [7:0] in0_pia;  // PIA1 port B — normally 0xFF, Space Dungeon uses [1:0] for starts
+
+always @(*) begin
+    // defaults
+    p1_pia  = 8'hFF;
+    p2_pia  = 8'hFF;
+    in0_pia = 8'hFF;
+
+    case (game_id)
+
+        8'h00,          // Qix / Qix II
+        8'h03: begin    // Kram (same P1 layout; Kram P2 has BTN2 at [4] but [6:5]=11 so we reuse p2_btn2)
+            // P1: [7]=BTN1 [6]=S1 [5]=S2 [4]=BTN2 [3:0]=L,D,R,U
+            p1_pia = {p1_btn1, start_buttons[0], start_buttons[1], p1_btn2, p1_joy_pia};
+            // P2: [7]=BTN1 [6:4]=111 [3:0]=L,D,R,U  (Kram has BTN2 at [4], map p2_btn2 there)
+            p2_pia = {p2_btn1, 3'b111, p2_joy_pia};
+        end
+
+        8'h01: begin    // Complex X
+            // P1 (left stick): [7]=1(unused) [6]=S1 [5]=S2 [4]=BTN1(jump) [3:0]=L,D,R,U
+            p1_pia = {1'b1, start_buttons[0], start_buttons[1], p1_btn1, p1_joy_pia};
+            // P2 (right stick = fire direction): [7:4]=L,D,R,U  [3:0]=1111
+            p2_pia = {p2_joystick[2], p2_joystick[1], p2_joystick[3], p2_joystick[0], 4'hF};
+        end
+
+        8'h02: begin    // Space Dungeon
+            // P1: [7:4]=RIGHT_L,D,R,U  [3:0]=LEFT_L,D,R,U  (both sticks in PIA0 PA)
+            // We reuse p2_joystick as right stick, p1_joystick as left stick
+            p1_pia  = {p2_joystick[2], p2_joystick[1], p2_joystick[3], p2_joystick[0],
+                       p1_joy_pia};
+            // P2 (cocktail — left stick same mapping)
+            p2_pia  = {p2_joystick[2], p2_joystick[1], p2_joystick[3], p2_joystick[0],
+                       p1_joy_pia};
+            // START1/START2 live in PIA1 port B bits [1:0]
+            in0_pia = {6'b111111, start_buttons[1], start_buttons[0]};
+        end
+
+        8'h04: begin    // Zoo Keeper
+            // P1: [7]=1 [6]=BTN1 [5]=S2 [4]=S1 [3:0]=L,D,R,U
+            p1_pia = {1'b1, p1_btn1, start_buttons[1], start_buttons[0], p1_joy_pia};
+            // P2: [7]=1 [6]=BTN1 [5:4]=11 [3:0]=L,D,R,U
+            p2_pia = {1'b1, p2_btn1, 2'b11, p2_joy_pia};
+        end
+
+        8'h05: begin    // Slither (trackball — joystick not connected, spare inputs handle it)
+            // P1: [7]=BTN1 [6]=S1 [5]=S2 [4]=BTN2 [3:0]=1111
+            p1_pia = {p1_btn1, start_buttons[0], start_buttons[1], p1_btn2, 4'hF};
+            // P2: [7]=BTN1 [6:5]=11 [4]=BTN2 [3:0]=1111
+            p2_pia = {p2_btn1, 2'b11, p2_btn2, 4'hF};
+        end
+
+        8'h06: begin    // Electric Yo-Yo
+            // P1: [7]=1 [6]=S1 [5]=S2 [4]=1 [3:0]=L,D,R,U
+            p1_pia = {1'b1, start_buttons[0], start_buttons[1], 1'b1, p1_joy_pia};
+            // P2: [7:4]=1111 [3:0]=L,D,R,U
+            p2_pia = {4'hF, p2_joy_pia};
+        end
+
+        default: begin  // fallback = Qix
+            p1_pia = {p1_btn1, start_buttons[0], start_buttons[1], p1_btn2, p1_joy_pia};
+            p2_pia = {p2_btn1, 3'b111, p2_joy_pia};
+        end
+
+    endcase
+end
 
 // ---------------------------------------------------------------------------
 // Qix_CPU — data CPU board
@@ -321,7 +391,7 @@ Qix_CPU cpu_board (
     .p1_input        (p1_pia),
     .coin_input      (coin_pia),
     .spare_input     (8'hFF),
-    .in0_input       (8'hFF),
+    .in0_input       (in0_pia),
     .p2_input        (p2_pia),
 
     .crtc_vsync      (crtc_vsync_out),

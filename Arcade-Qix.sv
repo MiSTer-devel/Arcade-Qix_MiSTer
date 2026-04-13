@@ -233,8 +233,8 @@ localparam CONF_STR = {
 	"P2O7A,V Center,0,-1,-2,-3,-4,-5,-6,-7,-8,-9,-10,-11,-12;",
 	"-;",	
 	"R0,Reset;",
-	"J1,Draw Slow,Draw Fast,Coin,Start 1P,Start 2P,Pause;",
-	"jn,A,B,Select,Start,R,L;",
+	"J1,Button 1,Button 2,Coin,Start 1P,Start 2P,Pause,Test Advance,Start 2P(alt);",
+	"jn,A,B,Select,Start,R,L,X,Y;",
 	"V,v",`BUILD_DATE
 };
 
@@ -254,6 +254,7 @@ wire  [7:0] ioctl_din;
 
 wire [15:0] joystick_0, joystick_1;
 wire [15:0] joy = joystick_0 | joystick_1;
+wire [15:0] joystick_r_analog_0;   // right analog stick: [15:8]=Y signed, [7:0]=X signed
 
 wire [21:0] gamma_bus;
 wire        direct_video;
@@ -284,6 +285,7 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
+	.joystick_r_analog_0(joystick_r_analog_0),
 	.ps2_key(ps2_key)
 );
 
@@ -323,6 +325,14 @@ pll_cfg pll_cfg
 assign CLK_VIDEO = CLK_40M;   // HDMI needs the 40 MHz reference
 
 wire reset = RESET | status[0] | buttons[1] | ioctl_download;
+
+// game_id: latched from ioctl index 1 (single byte written by MRA)
+// 00=Qix  01=ComplexX  02=SpaceDungeon  03=Kram  04=ZooKeep  05=Slither  06=ElecYoYo
+reg [7:0] game_id = 8'h00;
+always @(posedge CLK_20M) begin
+    if (ioctl_wr && ioctl_index == 8'd1)
+        game_id <= ioctl_dout;
+end
 
 ///////////////////         Keyboard           //////////////////
 
@@ -380,25 +390,54 @@ wire m_btn1_p1  = btn_fire      | joystick_0[4];
 wire m_btn2_p1  = btn_fire2     | joystick_0[5];
 
 //Player 2
-wire m_up2      = btn_up		| joystick_1[3];
+wire m_up2      = btn_up        | joystick_1[3];
 wire m_down2    = btn_down      | joystick_1[2];
 wire m_left2    = btn_left      | joystick_1[1];
 wire m_right2   = btn_right     | joystick_1[0];
 wire m_btn1_p2  = btn_fire      | joystick_1[4];
 wire m_btn2_p2  = btn_fire2     | joystick_1[5];
 
+// Right analog stick → 8 directional fire bits (threshold = 64/127)
+// joystick_r_analog_0[7:0]  = X axis (signed), positive = right
+// joystick_r_analog_0[15:8] = Y axis (signed), positive = down
+wire signed [7:0] rstick_x = joystick_r_analog_0[7:0];
+wire signed [7:0] rstick_y = joystick_r_analog_0[15:8];
+wire r_fire_right = (rstick_x >  8'sd64);
+wire r_fire_left  = (rstick_x < -8'sd64);
+wire r_fire_down  = (rstick_y >  8'sd64);
+wire r_fire_up    = (rstick_y < -8'sd64);
+
+// Dual-stick fire: right analog OR joystick_1 DPAD
+// Used by Complex X (game_id 01) and Space Dungeon (game_id 02)
+wire m_fire_up    = r_fire_up    | joystick_1[3];
+wire m_fire_down  = r_fire_down  | joystick_1[2];
+wire m_fire_left  = r_fire_left  | joystick_1[1];
+wire m_fire_right = r_fire_right | joystick_1[0];
+
+// For dual-stick games the jump/action button moves to Button 2 (R shoulder)
+// so the right thumb is free for the fire stick.
+// We use the registered game_id from our own latch above.
+wire dual_stick_game = (game_id == 8'h01) || (game_id == 8'h02);
+
+// Dual-stick games: jump on R1 [8] so right thumb stays free for fire stick
+// Normal games: btn1 = A [4] as usual
+wire m_jump     = btn_fire | joystick_0[8];   // R1 = jump for dual-stick
+wire m_p1_btn1  = dual_stick_game ? m_jump : m_btn1_p1;
+wire m_p1_btn2  = m_btn2_p1;
+
 //Start/Coin
 wire m_start1   = btn_1p_start  | joystick_0[7];
-wire m_start2   = btn_2p_start  | joystick_0[8];
+wire m_start2   = btn_2p_start  | joystick_0[8]   // R1 = Start 2P (non-dual-stick)
+                                | joystick_0[11];  // Y  = Start 2P (dual-stick games)
 wire m_coin1    = btn_coin1     | joystick_0[6];
 wire m_coin2    = btn_coin2     | joystick_1[6];
-wire m_pause    = btn_pause     | joystick_0[9];
+wire m_pause    = btn_pause     | joystick_0[9];   // L1 = Pause
 
 //Service Mode
-wire m_service  = btn_service   | joystick_0[8];
-wire m_service2 = btn_service2                 ;
-wire m_service3 = btn_service3                 ;
-wire m_service4 = btn_service4                 ;
+wire m_service  = btn_service   | joystick_0[10]; // X button = Test Advance
+wire m_service2 = btn_service2                  ;
+wire m_service3 = btn_service3                  ;
+wire m_service4 = btn_service4                  ;
 
 // PAUSE SYSTEM
 wire pause_cpu;
@@ -446,13 +485,17 @@ Qix QIX_inst
 
 	.clk_20m(CLK_20M),
 
+	.game_id(game_id),
+
 	.coin({~m_coin2, ~m_coin1}),
 	.start_buttons({~m_start2, ~m_start1}),
 
 	.p1_joystick({~m_right1, ~m_left1, ~m_down1, ~m_up1}),
-	.p2_joystick({~m_right2, ~m_left2, ~m_down2, ~m_up2}),
-	.p1_btn1(~m_btn1_p1),
-	.p1_btn2(~m_btn2_p1),
+	.p2_joystick(dual_stick_game
+	                 ? {~m_fire_right, ~m_fire_left, ~m_fire_down, ~m_fire_up}
+	                 : {~m_right2,     ~m_left2,     ~m_down2,     ~m_up2}),
+	.p1_btn1(~m_p1_btn1),
+	.p1_btn2(~m_p1_btn2),
 	.p2_btn1(~m_btn1_p2),
 	.p2_btn2(~m_btn2_p2),
 	

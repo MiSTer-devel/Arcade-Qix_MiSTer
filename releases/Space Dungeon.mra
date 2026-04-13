@@ -11,7 +11,7 @@
     <region>World</region>
     <category>Shooter</category>
 
-    <buttons names="Fire,Coin,Start 1P,Start 2P,Pause" default="A,Select,Start,R,L"/>
+    <buttons names="-(unused),-(unused),Coin,Start 1P,Jump,Pause,Test,Start 2P" default="A,B,Select,Start,R,L,X,Y"/>
 
     <!--
         maincpu: $A000-$FFFF (6x 4KB = 24KB, fills all 6 slots)
@@ -41,6 +41,11 @@
         <part repeat="0x2000">00</part>
         <part name="sd26.u26" crc="3df8630d"/>
         <part name="sd27.u27" crc="0386f351"/>
+    </rom>
+
+    <!-- ROM index 1: game_id = 0x02 (SPACE DUNGEON) -->
+    <rom index="1">
+        <part>02</part>
     </rom>
 
     <nvram index="4" size="1024"></nvram>
