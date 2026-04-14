@@ -40,8 +40,8 @@ Default MiSTer gamepad mapping:
 | Input | Action |
 |-------|--------|
 | D-Pad / Joystick | Move |
-| A | Slow Draw |
-| B | Fast Draw |
+| A | Fast Draw |
+| B | Slow Draw |
 | Select | Insert Coin |
 | Start | 1 Player Start |
 | Right Shoulder | Test Advance |
@@ -53,7 +53,7 @@ Default MiSTer gamepad mapping:
 
 - Arcade-accurate CPU timing
 - Sprite priority and layer handling
-- High score saving support (Will be improved)
+- High score saving support
 - MiSTer-compatible .mra provided
 - Verified ROM definitions with checksums
 

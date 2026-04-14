@@ -224,6 +224,8 @@ localparam CONF_STR = {
 	"OB,Flip Vertical,Off,On;",
 	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
+	"OR,Autosave NVRAM,Off,On;",
+	"-;",
 	"P1,Pause Options;",
 	"P1OP,Pause when OSD is open,On,Off;",
 	"P1OQ,Dim video after 10s,On,Off;",
@@ -430,7 +432,6 @@ wire m_start1   = btn_1p_start  | joystick_0[7];
 wire m_start2   = btn_2p_start  | joystick_0[8]   // R1 = Start 2P (non-dual-stick)
                                 | joystick_0[11];  // Y  = Start 2P (dual-stick games)
 wire m_coin1    = btn_coin1     | joystick_0[6];
-wire m_coin2    = btn_coin2     | joystick_1[6];
 wire m_pause    = btn_pause     | joystick_0[9];   // L1 = Pause
 
 //Service Mode
@@ -540,6 +541,6 @@ wire        nvram_write   = nvram_download && ioctl_wr;
 wire [7:0]  nvram_data_out;
 
 assign ioctl_din = nvram_data_out;
-assign ioctl_upload_req = 0;
+assign ioctl_upload_req = status[27] & ~ioctl_download;
 
 endmodule
