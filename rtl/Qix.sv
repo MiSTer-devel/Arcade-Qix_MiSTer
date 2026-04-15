@@ -135,9 +135,13 @@ dpram_dc #(.widthad_a(10)) shared_ram_inst (
 //   $0C000-$0EFFF : audio CPU (12KB, covers $D000-$FFFF platform max)
 //                  Qix: qq27.u27 is 2KB at $F800, padded to land at $0E800
 // ---------------------------------------------------------------------------
-wire cpu_ioctl_wr = ioctl_wr & (ioctl_addr < 25'h06000);                             // 24KB
-wire vid_ioctl_wr = ioctl_wr & (ioctl_addr >= 25'h06000) & (ioctl_addr < 25'h0C000); // 24KB
-wire snd_ioctl_wr = ioctl_wr & (ioctl_addr >= 25'h0C000) & (ioctl_addr < 25'h0F000); // 12KB ($D000-$FFFF)
+wire cpu_ioctl_wr = ioctl_wr & (ioctl_index == 8'd0) & (ioctl_addr < 25'h06000);                             // 24KB
+wire vid_ioctl_wr = ioctl_wr & (ioctl_index == 8'd0) & (ioctl_addr >= 25'h06000) & (ioctl_addr < 25'h0C000); // 24KB
+wire snd_ioctl_wr = ioctl_wr & (ioctl_index == 8'd0) & (ioctl_addr >= 25'h0C000) & (ioctl_addr < 25'h0F000); // 12KB ($D000-$FFFF)
+
+// MCU EPROM (MC68705P3, 2KB) loaded via ioctl_index == 2
+wire        mcu_ioctl_wr   = ioctl_wr & (ioctl_index == 8'd2);
+wire [10:0] mcu_ioctl_addr = ioctl_addr[10:0];
 // ---------------------------------------------------------------------------
 // FIRQ cross-signals (from schematic Figure 13, U7 7474 dual flip-flop)
 //
@@ -407,7 +411,12 @@ Qix_CPU cpu_board (
     .ioctl_data      (ioctl_data),
     .ioctl_wr        (cpu_ioctl_wr),
 
-    .pause           (pause)
+    .mcu_rom_addr    (mcu_ioctl_addr),
+    .mcu_rom_data    (ioctl_data),
+    .mcu_rom_wr      (mcu_ioctl_wr),
+
+    .pause           (pause),
+    .game_id         (game_id)
 //    .pause           (pause | vid_sh_cs)
 );
 

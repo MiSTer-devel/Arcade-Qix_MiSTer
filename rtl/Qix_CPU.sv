@@ -53,7 +53,13 @@ module Qix_CPU (
     input  [7:0]  ioctl_data,
     input         ioctl_wr,
 
-    input         pause
+    // MCU EPROM loading (ioctl_index == 2, 2KB)
+    input  [10:0] mcu_rom_addr,
+    input  [7:0]  mcu_rom_data,
+    input         mcu_rom_wr,
+
+    input         pause,
+    input  [7:0]  game_id
 );
 
 // ---------------------------------------------------------------------------
@@ -142,9 +148,17 @@ mc6809e data_cpu (
     .AVMA   (),
     .BUSY   (),
     .LIC    (),
-    .nHALT  (~pause),
+    .nHALT  (~pause & ~mcu_cpu_halt),
     .nRESET (~reset)
 );
+
+// ---------------------------------------------------------------------------
+// MCU game detection — Space Dungeon, Kram, Electric Yo-Yo, Zoo Keeper
+// ---------------------------------------------------------------------------
+wire is_mcu_game = (game_id == 8'h02) ||  // Space Dungeon
+                   (game_id == 8'h03) ||  // Kram
+                   (game_id == 8'h04) ||  // Zoo Keeper
+                   (game_id == 8'h06);    // Electric Yo-Yo
 
 // ---------------------------------------------------------------------------
 // Shared RAM — port A passthrough (dual-port RAM lives in Qix.sv)
@@ -220,6 +234,12 @@ assign n_irq = ~(sndpia_irqa | sndpia_irqb);
 // ---------------------------------------------------------------------------
 wire [7:0] pia0_dout;
 wire       pia0_irqa, pia0_irqb;
+wire [7:0] pia0_pb_o, pia0_pb_oe;
+
+// PIA0 PB input: for MCU games the MCU's PA output drives this; for non-MCU
+// games the raw coin_input switch bus drives it directly.
+wire [7:0] mcu_pa_out;
+wire [7:0] pia0_pb_i = is_mcu_game ? mcu_pa_out : coin_input;
 
 pia6821 pia0 (
     .clk      (clk_20m),
@@ -238,9 +258,9 @@ pia6821 pia0 (
     .ca2_i    (1'b1),
     .ca2_o    (),
     .ca2_oe   (),
-    .pb_i     (coin_input),
-    .pb_o     (),
-    .pb_oe    (),
+    .pb_i     (pia0_pb_i),
+    .pb_o     (pia0_pb_o),
+    .pb_oe    (pia0_pb_oe),
     .cb1      (1'b1),
     .cb2_i    (1'b1),
     .cb2_o    (),
@@ -284,6 +304,7 @@ pia6821 pia1 (
 // ---------------------------------------------------------------------------
 wire [7:0] pia2_dout;
 wire       pia2_irqa, pia2_irqb;
+wire [7:0] pia2_pb_o, pia2_pb_oe;
 
 pia6821 pia2 (
     .clk      (clk_20m),
@@ -303,8 +324,8 @@ pia6821 pia2 (
     .ca2_o    (),
     .ca2_oe   (),
     .pb_i     (8'h00),
-    .pb_o     (),           // coin counters / lockout (unconnected for now)
-    .pb_oe    (),
+    .pb_o     (pia2_pb_o),  // bit 2 → MCU IRQ, bit 3 → MCU PC[3] (coinctrl)
+    .pb_oe    (pia2_pb_oe),
     .cb1      (1'b1),
     .cb2_i    (1'b1),
     .cb2_o    (),
@@ -331,18 +352,105 @@ always @(posedge clk_20m) begin
 end
 
 // ---------------------------------------------------------------------------
+// MC68705P3 coin-input microcontroller (MCU games only)
+//
+// Interface per MAME qix_m.cpp:
+//   - Data CPU writes PIA0 PB → MCU PA input  (coin_w)
+//   - MCU PA output           → PIA0 PB input (coin_r — already wired via
+//                                               pia0_pb_i mux above)
+//   - MCU PB = (coin & 0x0F) | ((coin & 0x80) >> 3)
+//   - MCU PC = (coinctrl & 0x08) | ((coin & 0x70) >> 4)
+//   - PIA2 PB[2] → /IRQ (active-low when bit is high)
+// ---------------------------------------------------------------------------
+
+// Halt 6809 while MCU processes IRQ — gives MCU time to run handler
+// before 6809 reads the response. 64 E-cycles ≈ 51µs at 1.25MHz.
+reg [6:0] mcu_halt_cnt = 7'd0;
+wire      mcu_cpu_halt = (mcu_halt_cnt != 7'd0) & is_mcu_game;
+
+reg mcu_irq_n_r = 1'b1;
+always @(posedge clk_20m) mcu_irq_n_r <= mcu_irq_n;
+
+always @(posedge clk_20m) begin
+    if (reset) begin
+        mcu_halt_cnt <= 7'd0;
+    end else if (is_mcu_game & ~mcu_irq_n & mcu_irq_n_r) begin
+        mcu_halt_cnt <= 7'd64;
+    end else if (mcu_halt_cnt != 7'd0 && ce_E_fall) begin
+        mcu_halt_cnt <= mcu_halt_cnt - 7'd1;
+    end
+end
+
+// 4 MHz enable from 20 MHz: pulse one-in-five clk_20m ticks.
+reg [2:0] mcu_ce_div = 3'd0;
+reg       mcu_ce_4m  = 1'b0;
+always @(posedge clk_20m) begin
+    mcu_ce_4m <= 1'b0;
+    if (reset) begin
+        mcu_ce_div <= 3'd0;
+    end else if (mcu_ce_div == 3'd4) begin
+        mcu_ce_div <= 3'd0;
+        mcu_ce_4m  <= 1'b1;
+    end else begin
+        mcu_ce_div <= mcu_ce_div + 3'd1;
+    end
+end
+
+// MCU port inputs derived from coin_input and PIA2 coinctrl.
+wire [7:0] mcu_pb_in = {3'b000, coin_input[7], coin_input[3:0]};
+wire [3:0] mcu_pc_in = {pia2_pb_o[3], coin_input[6:4]};
+wire       mcu_irq_n = ~pia2_pb_o[2];
+
+mc68705p3 mcu (
+    .clk      (clk_20m),
+    .ce_4m    (mcu_ce_4m),
+    .reset    (reset),
+    .irq_n    (mcu_irq_n),
+    .pa_in    (pia0_pb_o),
+    .pa_out   (mcu_pa_out),
+    .pb_in    (mcu_pb_in),
+    .pb_out   (),
+    .pb_ddr   (),
+    .pc_in    (mcu_pc_in),
+    .pc_out   (),
+    .pc_ddr   (),
+    .rom_wr   (mcu_rom_wr),
+    .rom_addr (mcu_rom_addr),
+    .rom_data (mcu_rom_data)
+);
+
+// ---------------------------------------------------------------------------
 // CPU data bus read mux — default $FF for open-bus / unimplemented reads
 // ---------------------------------------------------------------------------
 
+// MCU games: intercept PIA0 port B reads and return MCU PA output directly.
+// The PIA ignores pb_i when DDRB=FF (output mode), but the game reads port B
+// expecting the MCU's response. Bypassing the PIA here delivers mcu_pa_out
+// regardless of DDR state. Non-MCU games read PIA0 normally.
+
+// MCU reply latch — captures mcu_pa_out at the end of the halt window,
+// guaranteeing the 6809 sees a stable fully-processed reply.
+reg [7:0] mcu_reply_latched = 8'h00;
+
+always @(posedge clk_20m) begin
+    if (reset)
+        mcu_reply_latched <= 8'h00;
+    else if (is_mcu_game && mcu_halt_cnt == 7'd1 && ce_E_fall)
+        mcu_reply_latched <= mcu_pa_out;
+end
+
+wire pia0_pb_read = pia0_cs & cpu_RnW & (cpu_A[1:0] == 2'b10);
+
 assign cpu_Din =
-    shared_cs  ? shared_dout   :
-    local_cs   ? local_ram_dout:
-    acia_cs    ? 8'h02         :
-    sndpia_cs  ? sndpia_dout   :
-    pia0_cs    ? pia0_dout     :
-    pia1_cs    ? pia1_dout     :
-    pia2_cs    ? pia2_dout     :
-    rom_cs     ? rom_dout      :
+    shared_cs                        ? shared_dout    :
+    local_cs                         ? local_ram_dout :
+    acia_cs                          ? 8'h02          :
+    sndpia_cs                        ? sndpia_dout    :
+    (pia0_pb_read & is_mcu_game)     ? mcu_reply_latched :
+    pia0_cs                          ? pia0_dout      :
+    pia1_cs                          ? pia1_dout      :
+    pia2_cs                          ? pia2_dout      :
+    rom_cs                           ? rom_dout       :
     8'hFF;
 
 endmodule

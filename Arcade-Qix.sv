@@ -519,7 +519,7 @@ Qix QIX_inst
 	.sound_r(audio_r),
 
     .ioctl_addr(ioctl_addr),
-    .ioctl_wr(ioctl_wr && (ioctl_index == 8'd0)),
+    .ioctl_wr(ioctl_wr && ((ioctl_index == 8'd0) || (ioctl_index == 8'd2))),
     .ioctl_data(ioctl_dout),
     .ioctl_index(ioctl_index),
 

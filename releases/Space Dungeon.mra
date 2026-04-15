@@ -48,6 +48,11 @@
         <part>02</part>
     </rom>
 
+    <!-- ROM index 2: MCU EPROM (MC68705P3) -->
+    <rom index="2" zip="sdungeon.zip" md5="none">
+        <part name="sd101" crc="e255af9a"/>
+    </rom>
+
     <nvram index="4" size="1024"></nvram>
 
 </misterromdescription>

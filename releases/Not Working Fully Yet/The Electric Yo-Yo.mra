@@ -40,6 +40,11 @@
         <part>06</part>
     </rom>
 
+    <!-- ROM index 2: MCU EPROM (MC68705P3) -->
+    <rom index="2" zip="elecyoyo.zip" md5="none">
+        <part name="yy101" crc="3cf13038"/>
+    </rom>
+
     <nvram index="4" size="1024"></nvram>
 
 </misterromdescription>
