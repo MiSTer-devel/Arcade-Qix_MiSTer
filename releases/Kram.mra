@@ -11,7 +11,7 @@
     <region>World</region>
     <category>Maze</category>
 
-    <buttons names="Attack,Jump,Coin,Start 1P,Start 2P,Pause,Test,-(unused)" default="A,B,Select,Start,R,L,X,Y"/>
+    <buttons names="Walls,Bustout,Coin,Start 1P,Start 2P,Pause,Test,-(unused)" default="A,B,Select,Start,R,L,X,Y"/>
 
     <rom index="0" zip="kram.zip" md5="none">
         <!-- Data CPU: 6x 4KB at $A000-$FFFF -->

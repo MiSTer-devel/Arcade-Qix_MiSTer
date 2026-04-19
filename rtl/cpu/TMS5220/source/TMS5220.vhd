@@ -779,25 +779,123 @@ begin
 							end if;
 						end if;
 
-					when 2 to 5 =>  -- K1-K4  5 bits
+					-- K1 (5 bits) — PC=2
+					when 2 =>
 						if ((m_new_frame_repeat = '0') and ((m_new_frame_voiced = '1') or (m_new_frame_unvoiced = '1'))) then
-							if (m_FIFO_ptr <= FIFO_bits - K_bits(m_PC-2)) then
-								m_FIFO_ptr <= m_FIFO_ptr + K_bits(m_PC-2);
-								m_FIFO <= m_FIFO(FIFO_bits - 1 - K_bits(m_PC-2) downto 0) & ZERO(K_bits(m_PC-2) downto 1);
-								tmp_new_frame_k_idx(m_PC-2) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - K_bits(m_PC-2))));
+							if (m_FIFO_ptr <= FIFO_bits - 5) then
+								m_FIFO_ptr <= m_FIFO_ptr + 5;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 5 downto 0) & ZERO(5 downto 1);
+								tmp_new_frame_k_idx(0) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 5)));
 							else
-								m_UF <= '1'; -- FIFO underflow
+								m_UF <= '1';
 							end if;
 						end if;
 
-					when 6 to 11 =>  -- K5-K10  4 bits
-						if ((m_new_frame_repeat = '0') and (m_new_frame_voiced = '1')) then
-							if (m_FIFO_ptr <= FIFO_bits - K_bits(m_PC-2)) then
-								m_FIFO_ptr <= m_FIFO_ptr + K_bits(m_PC-2);
-								m_FIFO <= m_FIFO(FIFO_bits - 1 - K_bits(m_PC-2) downto 0) & ZERO(K_bits(m_PC-2) downto 1);
-								tmp_new_frame_k_idx(m_PC-2) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - K_bits(m_PC-2))));
+					-- K2 (5 bits) — PC=3
+					when 3 =>
+						if ((m_new_frame_repeat = '0') and ((m_new_frame_voiced = '1') or (m_new_frame_unvoiced = '1'))) then
+							if (m_FIFO_ptr <= FIFO_bits - 5) then
+								m_FIFO_ptr <= m_FIFO_ptr + 5;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 5 downto 0) & ZERO(5 downto 1);
+								tmp_new_frame_k_idx(1) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 5)));
 							else
-								m_UF <= '1'; -- FIFO underflow
+								m_UF <= '1';
+							end if;
+						end if;
+
+					-- K3 (4 bits) — PC=4
+					when 4 =>
+						if ((m_new_frame_repeat = '0') and ((m_new_frame_voiced = '1') or (m_new_frame_unvoiced = '1'))) then
+							if (m_FIFO_ptr <= FIFO_bits - 4) then
+								m_FIFO_ptr <= m_FIFO_ptr + 4;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 4 downto 0) & ZERO(4 downto 1);
+								tmp_new_frame_k_idx(2) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 4)));
+							else
+								m_UF <= '1';
+							end if;
+						end if;
+
+					-- K4 (4 bits) — PC=5
+					when 5 =>
+						if ((m_new_frame_repeat = '0') and ((m_new_frame_voiced = '1') or (m_new_frame_unvoiced = '1'))) then
+							if (m_FIFO_ptr <= FIFO_bits - 4) then
+								m_FIFO_ptr <= m_FIFO_ptr + 4;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 4 downto 0) & ZERO(4 downto 1);
+								tmp_new_frame_k_idx(3) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 4)));
+							else
+								m_UF <= '1';
+							end if;
+						end if;
+
+					-- K5 (4 bits) — PC=6  (voiced only from here on)
+					when 6 =>
+						if ((m_new_frame_repeat = '0') and (m_new_frame_voiced = '1')) then
+							if (m_FIFO_ptr <= FIFO_bits - 4) then
+								m_FIFO_ptr <= m_FIFO_ptr + 4;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 4 downto 0) & ZERO(4 downto 1);
+								tmp_new_frame_k_idx(4) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 4)));
+							else
+								m_UF <= '1';
+							end if;
+						end if;
+
+					-- K6 (4 bits) — PC=7
+					when 7 =>
+						if ((m_new_frame_repeat = '0') and (m_new_frame_voiced = '1')) then
+							if (m_FIFO_ptr <= FIFO_bits - 4) then
+								m_FIFO_ptr <= m_FIFO_ptr + 4;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 4 downto 0) & ZERO(4 downto 1);
+								tmp_new_frame_k_idx(5) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 4)));
+							else
+								m_UF <= '1';
+							end if;
+						end if;
+
+					-- K7 (4 bits) — PC=8
+					when 8 =>
+						if ((m_new_frame_repeat = '0') and (m_new_frame_voiced = '1')) then
+							if (m_FIFO_ptr <= FIFO_bits - 4) then
+								m_FIFO_ptr <= m_FIFO_ptr + 4;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 4 downto 0) & ZERO(4 downto 1);
+								tmp_new_frame_k_idx(6) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 4)));
+							else
+								m_UF <= '1';
+							end if;
+						end if;
+
+					-- K8 (3 bits) — PC=9
+					when 9 =>
+						if ((m_new_frame_repeat = '0') and (m_new_frame_voiced = '1')) then
+							if (m_FIFO_ptr <= FIFO_bits - 3) then
+								m_FIFO_ptr <= m_FIFO_ptr + 3;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 3 downto 0) & ZERO(3 downto 1);
+								tmp_new_frame_k_idx(7) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 3)));
+							else
+								m_UF <= '1';
+							end if;
+						end if;
+
+					-- K9 (3 bits) — PC=10
+					when 10 =>
+						if ((m_new_frame_repeat = '0') and (m_new_frame_voiced = '1')) then
+							if (m_FIFO_ptr <= FIFO_bits - 3) then
+								m_FIFO_ptr <= m_FIFO_ptr + 3;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 3 downto 0) & ZERO(3 downto 1);
+								tmp_new_frame_k_idx(8) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 3)));
+							else
+								m_UF <= '1';
+							end if;
+						end if;
+
+					-- K10 (3 bits) — PC=11
+					when 11 =>
+						if ((m_new_frame_repeat = '0') and (m_new_frame_voiced = '1')) then
+							if (m_FIFO_ptr <= FIFO_bits - 3) then
+								m_FIFO_ptr <= m_FIFO_ptr + 3;
+								m_FIFO <= m_FIFO(FIFO_bits - 1 - 3 downto 0) & ZERO(3 downto 1);
+								tmp_new_frame_k_idx(9) <= to_integer(unsigned(m_FIFO(FIFO_bits - 1 downto FIFO_bits - 3)));
+							else
+								m_UF <= '1';
 							end if;
 						end if;
 

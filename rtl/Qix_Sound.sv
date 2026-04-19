@@ -94,6 +94,15 @@ wire sndpia2_en = snd_cen & sndpia2_cs_addr;
 wire sndpia1_en = snd_cen & sndpia1_cs_addr;
 
 // ---------------------------------------------------------------------------
+// TMS5200 clock enable — 625 kHz from 20 MHz (/32)
+// Nominal chip rate is 640 kHz from RC oscillator (pot-adjustable);
+// 625 kHz is 2.3% slow — well within RC oscillator tolerance, inaudible.
+// ---------------------------------------------------------------------------
+reg [4:0] tms_div = 5'd0;
+always @(posedge clk_20m) tms_div <= tms_div + 5'd1;
+wire tms_cen = (tms_div == 5'd0) & ~pause;
+
+// ---------------------------------------------------------------------------
 // 6802 internal RAM — 128 bytes ($0000-$007F)
 // cpu68 is a pure CPU core and does NOT include internal RAM.
 // ---------------------------------------------------------------------------
@@ -188,10 +197,25 @@ assign snd_data_out   = sndpia1_pa_o;
 assign snd_irq_to_cpu = sndpia1_ca2_o;
 
 // ---------------------------------------------------------------------------
-// sndPIA2 ($2000-$3FFF) — TMS5220 PIA (mapped per MAME, never accessed)
+// sndPIA2 ($2000-$3FFF) — TMS5200 speech PIA (Kram's "KRAM!" voice)
+// Wiring per Kram schematic:
+//   port B ↔ D0-D7
+//   CA1    ← /INT    (TMS5200 interrupt)
+//   CA2    → /WS     (write strobe)
+//   CB1    ← /READY  (ready for next byte)
+//   CB2    → /RS     (read strobe)
 // ---------------------------------------------------------------------------
 wire [7:0] sndpia2_dout;
 wire       sndpia2_irqa, sndpia2_irqb;
+
+wire [7:0] sndpia2_pb_o,  sndpia2_pb_oe;
+wire       sndpia2_ca2_o, sndpia2_ca2_oe;
+wire       sndpia2_cb2_o, sndpia2_cb2_oe;
+
+// TMS5200 outputs
+wire [7:0]         tms_dout;
+wire               tms_intn, tms_rdyn;
+wire signed [13:0] tms_spkr;
 
 pia6821_sv sndpia2 (
     .clk      (clk_20m),
@@ -203,20 +227,48 @@ pia6821_sv sndpia2 (
     .data_out (sndpia2_dout),
     .irqa     (sndpia2_irqa),
     .irqb     (sndpia2_irqb),
-    .pa_i     (8'hFF),
+    .pa_i     (8'hFF),            // port A unused
     .pa_o     (),
     .pa_oe    (),
-    .ca1      (1'b0),
+    .ca1      (tms_intn),         // /INT from TMS5200
     .ca2_i    (1'b1),
-    .ca2_o    (),
-    .ca2_oe   (),
-    .pb_i     (8'hFF),
-    .pb_o     (),
-    .pb_oe    (),
-    .cb1      (1'b0),
+    .ca2_o    (sndpia2_ca2_o),    // /WS to TMS5200
+    .ca2_oe   (sndpia2_ca2_oe),
+    .pb_i     (tms_dout),         // D0-D7 from TMS5200 (status reads)
+    .pb_o     (sndpia2_pb_o),     // D0-D7 to TMS5200 (command/data writes)
+    .pb_oe    (sndpia2_pb_oe),
+    .cb1      (tms_rdyn),         // /READY from TMS5200
     .cb2_i    (1'b1),
-    .cb2_o    (),
-    .cb2_oe   ()
+    .cb2_o    (sndpia2_cb2_o),    // /RS to TMS5200
+    .cb2_oe   (sndpia2_cb2_oe)
+);
+
+// ---------------------------------------------------------------------------
+// TMS5200 speech chip (using TMS5220 core — functionally equivalent for
+// the Speak External + data write path that Kram uses)
+// ---------------------------------------------------------------------------
+TMS5220 u_tms5200 (
+    .I_OSC    (clk_20m),
+    .I_ENA    (tms_cen),
+    .I_WSn    (sndpia2_ca2_o),
+    .I_RSn    (sndpia2_cb2_o),
+    .I_DATA   (1'b0),              // VSM serial in — unused on Kram
+    .I_TEST   (1'b0),
+    .I_DBUS   (sndpia2_pb_o),
+    .O_DBUS   (tms_dout),
+    .O_RDYn   (tms_rdyn),
+    .O_INTn   (tms_intn),
+    .O_M0     (),                  // VSM control — unused
+    .O_M1     (),
+    .O_ADD8   (),
+    .O_ADD4   (),
+    .O_ADD2   (),
+    .O_ADD1   (),
+    .O_ROMCLK (),                  // would clock VSM ROM; goes to TP6 only
+    .O_T11    (),
+    .O_IO     (),
+    .O_PRMOUT (),
+    .O_SPKR   (tms_spkr)
 );
 
 // IRQ to audio CPU: OR of all PIA interrupt outputs (active-high)
@@ -293,17 +345,25 @@ end
 wire [7:0] vol_l = vol_table[vol_data[7:4]];
 wire [7:0] vol_r = vol_table[vol_data[3:0]];
 
-// DAC output: unsigned 8-bit centered at $80 → signed 16-bit with volume
-// MAME: output = (data - 128) * 128, scaled by volume resistor network
-wire signed [8:0]  dac_centered  = $signed({1'b0, dac_val}) - 9'sh80;
-wire signed [17:0] dac_l_scaled  = dac_centered * $signed({2'b0, vol_l});
-wire signed [17:0] dac_r_scaled  = dac_centered * $signed({2'b0, vol_r});
+// DAC + TMS5200 speech mix — summed BEFORE volume attenuator to match
+// the Kram schematic (both feed the same resistor summing junction that
+// drives the L/R volume network).
+//
+// - dac_centered : signed 9-bit (±128)  — unsigned 8-bit DAC centered at $80
+// - tms_scaled   : signed 9-bit (~±128) — TMS5200 14-bit SPKR >>> 6
+//   (starting point — tune on hardware. Real HW attenuates SPKR through
+//    LM324 op-amp stages before summing.)
+// - mixed        : signed 10-bit (±256 headroom)
+// - × vol 8-bit unsigned → signed 19-bit product, slice [17:2] for 16-bit
+wire signed [8:0]  dac_centered = $signed({1'b0, dac_val}) - 9'sh80;
+wire signed [8:0]  tms_scaled   = tms_spkr >>> 6;
+wire signed [9:0]  mixed        = dac_centered + tms_scaled;
 
-assign audio_l = dac_l_scaled[16:1];
-assign audio_r = dac_r_scaled[16:1];
+wire signed [18:0] mix_l_scaled = mixed * $signed({2'b0, vol_l});
+wire signed [18:0] mix_r_scaled = mixed * $signed({2'b0, vol_r});
 
-// assign audio_l = dac_l_scaled[17:2];
-// assign audio_r = dac_r_scaled[17:2];
+assign audio_l = mix_l_scaled[17:2];
+assign audio_r = mix_r_scaled[17:2];
 
 
 endmodule
