@@ -61,6 +61,9 @@ module Qix_Video (
     input  [7:0]  hs_data_in,
     input         hs_write,
 
+    output chip_pool_pkg::m6809r_i_t m6809_i,
+    input  chip_pool_pkg::m6809r_o_t m6809_o,
+
     input         pause,
     input         flip,
     input  [7:0]  game_id
@@ -73,25 +76,16 @@ wire [15:0] cpu_A;
 wire [7:0]  cpu_Dout;
 wire        cpu_RnW;
 
-mc6809e video_cpu (
-    .D          (cpu_Din),
-    .DOut       (cpu_Dout),
-    .ADDR       (cpu_A),
-    .RnW        (cpu_RnW),
-    .CLK_ROOT   (clk_20m),
-    .CE_E_FALL  (ce_E_fall),
-    .CE_Q_FALL  (ce_Q_fall),
-    .nIRQ   (1'b1),
-    .nFIRQ  (video_firq_n),  // use internal SR latch, not raw pulse input
-    .nNMI   (1'b1),
-    .BS     (),
-    .BA     (),
-    .AVMA   (),
-    .BUSY   (),
-    .LIC    (),
-    .nHALT  (~pause),
-    .nRESET (~reset)
-);
+assign m6809_i.reset_n = ~reset;
+assign m6809_i.halt_n  = ~pause;
+assign m6809_i.fall_e  = ce_E_fall;
+assign m6809_i.fall_q  = ce_Q_fall;
+assign m6809_i.irq_n   = 1'b1;
+assign m6809_i.firq_n  = video_firq_n;
+assign m6809_i.nmi_n   = 1'b1;
+assign cpu_A    = m6809_o.a;
+assign cpu_Dout = m6809_o.dout;
+assign cpu_RnW  = m6809_o.rw;
 
 // ---------------------------------------------------------------------------
 // Write strobe: one-cycle pulse on falling edge of E while RnW is low
@@ -425,5 +419,7 @@ wire [7:0] cpu_Din =
     crtc_bus_cs    ? crtc_do_w            :
     rom_cs         ? rom_dout             :
     8'hFF;
+
+assign m6809_i.d = cpu_Din;
 
 endmodule

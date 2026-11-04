@@ -62,6 +62,9 @@ module Qix_CPU (
     input  [7:0]  mcu_rom_data,
     input         mcu_rom_wr,
 
+    output chip_pool_pkg::m6809r_i_t m6809_i,
+    input  chip_pool_pkg::m6809r_o_t m6809_o,
+
     input         pause,
     input  [7:0]  game_id,
     // DIAG-REVERT-2026-06-15: START1-seen probe out (delete this line + the comma after game_id to revert)
@@ -148,25 +151,17 @@ assign data_firq_ack = firq_ack_pulse;
 // ---------------------------------------------------------------------------
 // 6809E Data CPU
 // ---------------------------------------------------------------------------
-mc6809e data_cpu (
-    .D          (cpu_Din),
-    .DOut       (cpu_Dout),
-    .ADDR       (cpu_A),
-    .RnW        (cpu_RnW),
-    .CLK_ROOT   (clk_20m),
-    .CE_E_FALL  (ce_E_fall),
-    .CE_Q_FALL  (ce_Q_fall),
-    .nIRQ   (n_irq),
-    .nFIRQ  (data_firq_n),
-    .nNMI   (1'b1),
-    .BS     (),
-    .BA     (),
-    .AVMA   (),
-    .BUSY   (),
-    .LIC    (),
-    .nHALT  (~pause),
-    .nRESET (~reset)
-);
+assign m6809_i.reset_n = ~reset;
+assign m6809_i.halt_n  = ~pause;
+assign m6809_i.fall_e  = ce_E_fall;
+assign m6809_i.fall_q  = ce_Q_fall;
+assign m6809_i.irq_n   = n_irq;
+assign m6809_i.firq_n  = data_firq_n;
+assign m6809_i.nmi_n   = 1'b1;
+assign m6809_i.d       = cpu_Din;
+assign cpu_A    = m6809_o.a;
+assign cpu_Dout = m6809_o.dout;
+assign cpu_RnW  = m6809_o.rw;
 
 wire is_slither = (game_id == 8'h05);
 

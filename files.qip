@@ -1,21 +1,22 @@
 set_global_assignment -name VHDL_INPUT_VERSION VHDL_2008
 
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/chip_pool_pkg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_pool_pkg.sv
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-Qix.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/Qix.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/Qix_CPU.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/Qix_Video.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/Qix_Sound.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/qix_dispatcher.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/Qix.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/Qix_CPU.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/Qix_Video.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/Qix_Sound.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/pia6821_sound.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/qix_display.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/qix_palette.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/qix_vram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/qix_display.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/qix_palette.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/qix_vram.sv
 
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/pause.v
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/nvram.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister_custom/controllers.sv
 
-set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809e.v
-set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809i.v
 set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809is.v
 
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/mc68705p3.sv

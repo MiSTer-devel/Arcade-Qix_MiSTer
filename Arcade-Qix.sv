@@ -469,7 +469,7 @@ ctl_trackball #(.CW(10), .OUT_W(8), .MOUSE_SH(0), .SPIN_SH(0), .STICK_RSH(3), .D
 );
 
 //Instantiate Qix top-level platform module
-Qix QIX_inst
+qix_dispatcher QIX_inst
 (
 	.reset(reset),
 

@@ -64,6 +64,11 @@ module Qix (
     output [7:0]  hs_data_out,
     input         hs_write,
 
+    output chip_pool_pkg::m6809r_i_t m6809r_0_i,
+    input  chip_pool_pkg::m6809r_o_t m6809r_0_o,
+    output chip_pool_pkg::m6809r_i_t m6809r_1_i,
+    input  chip_pool_pkg::m6809r_o_t m6809r_1_o,
+
     input         pause,
     input         crt_flip,       // OSD 180 degree flip, XORed into the cocktail flip
     input  [3:0]  h_center,       // OSD screen centering
@@ -462,6 +467,9 @@ Qix_CPU cpu_board (
     .mcu_rom_data    (ioctl_data),
     .mcu_rom_wr      (mcu_ioctl_wr),
 
+    .m6809_i         (m6809r_0_i),
+    .m6809_o         (m6809r_0_o),
+
     .pause           (pause),
     .game_id         (game_id),
     .dbg_start1_led  (dbg_start1_led_w)   // DIAG-REVERT-2026-06-15: START1-seen probe (delete this line + comma above to revert)
@@ -518,6 +526,9 @@ Qix_Video video_board (
     .hs_data_out     (hs_data_out),
     .hs_data_in      (hs_data_in),
     .hs_write        (hs_write),
+
+    .m6809_i         (m6809r_1_i),
+    .m6809_o         (m6809r_1_o),
 
     .pause           (pause),
 //    .pause           (pause | cpu_sh_cs),
