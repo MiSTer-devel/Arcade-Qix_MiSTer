@@ -58,8 +58,11 @@ module qix_dispatcher
 /////////////////////////////  Shared CPU / sound chip pool  /////////////////////////////
 
 //   m6809r_0  data CPU     m6809r_1  video CPU
+//   pia6821[0] sndPIA0  [1] PIA0  [2] PIA1  [3] PIA2  (data CPU board)   [4] sndPIA1  [5] sndPIA2  (sound board)
 chip_pool_pkg::m6809r_i_t m6809r_0_i, m6809r_1_i;
 chip_pool_pkg::m6809r_o_t m6809r_0_o, m6809r_1_o;
+chip_pool_pkg::pia6821_i_t [5:0] pia6821_i;
+chip_pool_pkg::pia6821_o_t [5:0] pia6821_o;
 
 mc6809is m6809r_0
 (
@@ -77,9 +80,53 @@ mc6809is m6809r_1
     .nRESET(m6809r_1_i.reset_n), .nDMABREQ(1'b1), .RegData()
 );
 
+genvar pi;
+generate
+    for (pi = 0; pi < 6; pi++) begin : g_pia6821
+        pia6821 u
+        (
+            .clk(clk_20m), .rst(pia6821_i[pi].rst), .ce(pia6821_i[pi].ce), .cs(pia6821_i[pi].cs), .rw(pia6821_i[pi].rw),
+            .rs(pia6821_i[pi].rs), .din(pia6821_i[pi].din), .dout(pia6821_o[pi].dout),
+            .irqa(pia6821_o[pi].irqa), .irqb(pia6821_o[pi].irqb),
+            .pa_i(pia6821_i[pi].pa_i), .pa_pins(pia6821_i[pi].pa_pins), .pa_o(pia6821_o[pi].pa_o), .pa_oe(pia6821_o[pi].pa_oe),
+            .ca1(pia6821_i[pi].ca1), .ca2_i(pia6821_i[pi].ca2_i), .ca2_o(pia6821_o[pi].ca2_o), .ca2_oe(pia6821_o[pi].ca2_oe),
+            .pb_i(pia6821_i[pi].pb_i), .pb_o(pia6821_o[pi].pb_o), .pb_oe(pia6821_o[pi].pb_oe),
+            .cb1(pia6821_i[pi].cb1), .cb2_i(pia6821_i[pi].cb2_i), .cb2_o(pia6821_o[pi].cb2_o), .cb2_oe(pia6821_o[pi].cb2_oe)
+        );
+    end
+endgenerate
+
 /////////////////////////////  Shared ROM blocks  /////////////////////////////
 
 /////////////////////////////  Shared RAM pool  /////////////////////////////
+
+//   block 0   1K  NVRAM (video CPU; port B = hiscore)
+//   block 1  64K  VRAM  (video CPU + Slither mask RMW; port B = display scanout)
+localparam int RAM_BLOCKS = 2;
+
+ram_pool_pkg::pram_i_t [RAM_BLOCKS-1:0] pool_i;
+ram_pool_pkg::pram_o_t [RAM_BLOCKS-1:0] pool_o;
+
+function automatic int ram_aw(input int n);
+    case (n)
+        1:       ram_aw = 16;
+        default: ram_aw = 10;
+    endcase
+endfunction
+
+genvar pn;
+generate
+    for (pn = 0; pn < RAM_BLOCKS; pn = pn + 1) begin : rpool
+        localparam int AW = ram_aw(pn);
+        dpram_dc #(.widthad_a(AW)) ram
+        (
+            .clock_a(clk_20m), .address_a(pool_i[pn].a_addr[AW-1:0]), .data_a(pool_i[pn].a_d), .wren_a(pool_i[pn].a_we),
+            .q_a(pool_o[pn].a_q),
+            .clock_b(clk_20m), .address_b(pool_i[pn].b_addr[AW-1:0]), .data_b(pool_i[pn].b_d), .wren_b(pool_i[pn].b_we),
+            .q_b(pool_o[pn].b_q)
+        );
+    end
+endgenerate
 
 /////////////////////////////  Boards  /////////////////////////////
 
@@ -128,7 +175,11 @@ Qix qix
     .m6809r_0_i(m6809r_0_i),
     .m6809r_0_o(m6809r_0_o),
     .m6809r_1_i(m6809r_1_i),
-    .m6809r_1_o(m6809r_1_o)
+    .m6809r_1_o(m6809r_1_o),
+    .pia6821_i(pia6821_i),
+    .pia6821_o(pia6821_o),
+    .pr_i(pool_i),
+    .pr_o(pool_o)
 );
 
 endmodule

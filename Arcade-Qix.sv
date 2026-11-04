@@ -88,7 +88,7 @@ localparam CONF_STR = {
 	"H1P4OIJ,Trackball Speed,Normal,Fast,Slow;",
 	"H1-;",
 	"R0,Reset;",
-	"J1,Button 1,Button 2,Test Advance,Start 2P(alt),Coin,Start 1P,Start 2P,Pause;",
+	"J1,Button 1,Button 2,Test Advance,Start 2P(alt),Coin,Start 1P,Start 2P,Pause,R Right,R Left,R Down,R Up,Test Next Line,Test Slew Up,Test Slew Down;",
 	"jn,A,B,X,Y,Select,Start,R,L;",
 	"V,v",`BUILD_DATE
 };
@@ -107,12 +107,12 @@ wire [24:0] ioctl_addr;
 wire  [7:0] ioctl_dout;
 wire  [7:0] ioctl_din;
 
-wire [15:0] joystick_0, joystick_1;
+wire [31:0] joystick_0, joystick_1;
 wire [15:0] joystick_l_analog_0;
 wire [24:0] ps2_mouse;
 
 reg [7:0] game_id = 8'h00;
-wire [15:0] joy = joystick_0 | joystick_1;
+wire [15:0] joy = joystick_0[15:0] | joystick_1[15:0];
 wire [15:0] joystick_r_analog_0;   // right analog stick: [15:8]=Y signed, [7:0]=X signed
 
 wire [21:0] gamma_bus;
@@ -327,22 +327,16 @@ wire r_fire_down  = r_fire[2];
 wire r_fire_left  = r_fire[1];
 wire r_fire_right = r_fire[0];
 
-// Dual-stick fire: right analog OR joystick_1 DPAD
-// Used by Complex X (game_id 01) and Space Dungeon (game_id 02)
-wire m_fire_up    = r_fire_up    | joystick_1[3];
-wire m_fire_down  = r_fire_down  | joystick_1[2];
-wire m_fire_left  = r_fire_left  | joystick_1[1];
-wire m_fire_right = r_fire_right | joystick_1[0];
+// Dual-stick fire (Complex X game_id 01, Space Dungeon 02): right analog, J1 R Right/Left/Down/Up (MRA: A/Y/B/X),
+// or the P2 d-pad. Complex X jump = Button 1 (MRA: R).
+wire m_fire_up    = r_fire_up    | joystick_0[15] | joystick_1[3];
+wire m_fire_down  = r_fire_down  | joystick_0[14] | joystick_1[2];
+wire m_fire_left  = r_fire_left  | joystick_0[13] | joystick_1[1];
+wire m_fire_right = r_fire_right | joystick_0[12] | joystick_1[0];
 
-// For dual-stick games the jump/action button moves to Button 2 (R shoulder)
-// so the right thumb is free for the fire stick.
-// We use the registered game_id from our own latch above.
 wire dual_stick_game = (game_id == 8'h01) || (game_id == 8'h02);
 
-// Dual-stick games: jump on R1 [8] so right thumb stays free for fire stick
-// Normal games: btn1 = A [4] as usual
-wire m_jump     = btn_fire | joystick_0[10];   // R1 = jump for dual-stick
-wire m_p1_btn1  = dual_stick_game ? m_jump : m_btn1_p1;
+wire m_p1_btn1  = m_btn1_p1;
 wire m_p1_btn2  = m_btn2_p1;
 
 //Start/Coin
@@ -353,9 +347,9 @@ wire m_pause    = btn_pause     | joystick_0[11];   // L1 = Pause
 
 //Service Mode
 wire m_service  = btn_service   | joystick_0[6] ; // X button = Test Advance
-wire m_service2 = btn_service2                  ;
-wire m_service3 = btn_service3                  ;
-wire m_service4 = btn_service4                  ;
+wire m_service2 = btn_service2  | joystick_0[16]; // J1 Test Next Line (MRA: no default key)
+wire m_service3 = btn_service3  | joystick_0[17]; // J1 Test Slew Up
+wire m_service4 = btn_service4  | joystick_0[18]; // J1 Test Slew Down
 
 // PAUSE SYSTEM
 // CTL2-2026-10-25: original below (pause_cpu is now declared above the keyboard block)

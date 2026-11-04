@@ -68,6 +68,10 @@ module Qix (
     input  chip_pool_pkg::m6809r_o_t m6809r_0_o,
     output chip_pool_pkg::m6809r_i_t m6809r_1_i,
     input  chip_pool_pkg::m6809r_o_t m6809r_1_o,
+    output chip_pool_pkg::pia6821_i_t [5:0] pia6821_i,   // [3:0] Qix_CPU (sndPIA0, PIA0-2), [5:4] Qix_Sound (sndPIA1-2)
+    input  chip_pool_pkg::pia6821_o_t [5:0] pia6821_o,
+    output ram_pool_pkg::pram_i_t [1:0] pr_i,
+    input  ram_pool_pkg::pram_o_t [1:0] pr_o,
 
     input         pause,
     input         crt_flip,       // OSD 180 degree flip, XORed into the cocktail flip
@@ -469,6 +473,8 @@ Qix_CPU cpu_board (
 
     .m6809_i         (m6809r_0_i),
     .m6809_o         (m6809r_0_o),
+    .pia_i           (pia6821_i[3:0]),
+    .pia_o           (pia6821_o[3:0]),
 
     .pause           (pause),
     .game_id         (game_id),
@@ -529,6 +535,10 @@ Qix_Video video_board (
 
     .m6809_i         (m6809r_1_i),
     .m6809_o         (m6809r_1_o),
+    .nv_pr_i         (pr_i[0]),
+    .nv_pr_o         (pr_o[0]),
+    .vram_pr_i       (pr_i[1]),
+    .vram_pr_o       (pr_o[1]),
 
     .pause           (pause),
 //    .pause           (pause | cpu_sh_cs),
@@ -575,7 +585,9 @@ Qix_Sound sound_board (
     .ioctl_data       (ioctl_data),
     .ioctl_wr         (snd_ioctl_wr),
 
-    .pause            (pause)
+    .pause            (pause),
+    .pia_i            (pia6821_i[5:4]),
+    .pia_o            (pia6821_o[5:4])
 );
 
 endmodule

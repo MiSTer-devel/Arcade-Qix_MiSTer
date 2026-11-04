@@ -11,7 +11,7 @@
     <region>World</region>
     <category>Shooter</category>
 
-    <buttons names="Fire Up,Fire Down,Test Advance,-,Coin,1 Player,2 Player,Pause" default="A,B,X,Select,Start,R,L"/>
+    <buttons names="Fire Up,Fire Down,Test Advance,-,Coin,1 Player,2 Player,Pause,-,-,-,-,Test Next Line,Test Slew Up,Test Slew Down" default="A,B,X,Select,Start,R,L"/>
 
     <!-- Index 0: ROM -->
     <rom index="0" zip="slither.zip" md5="none">

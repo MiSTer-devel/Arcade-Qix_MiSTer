@@ -11,7 +11,7 @@
     <region>World</region>
     <category>Shooter</category>
 
-    <buttons names="-,-,Test Advance,-,Coin,Start 1P,Start 2P,Pause" default="X,Select,Start,R,L"/>
+    <buttons names="-,-,Test Advance,-,Coin,Start 1P,Start 2P,Pause,R Right,R Left,R Down,R Up,Test Next Line,Test Slew Up,Test Slew Down" default=",Select,Start,R,L,A,Y,B,X"/>
 
     <!-- Index 0: ROM -->
     <rom index="0" zip="sdungeon.zip" md5="none">

@@ -3,7 +3,7 @@
 // Qix Audio Board
 // Copyright (C) 2026 Rodimus
 //
-// Hardware: MC6802 audio CPU (cpu68 core) + 2× PIA6821 + 8-bit DAC +
+// Hardware: MC6802 audio CPU (cpu68 core) + 2× PIA6821 (dispatcher chip pool) + 8-bit DAC +
 //           discrete stereo volume attenuator
 //
 // Responsibilities:
@@ -36,7 +36,11 @@ module Qix_Sound (
     input  [7:0]  ioctl_data,
     input         ioctl_wr,
 
-    input         pause
+    input         pause,
+
+    // Chip pool: the two sound PIAs live in the dispatcher
+    output chip_pool_pkg::pia6821_i_t [1:0] pia_i,   // [0] sndPIA1  [1] sndPIA2
+    input  chip_pool_pkg::pia6821_o_t [1:0] pia_o
 );
 
 // ---------------------------------------------------------------------------
@@ -122,10 +126,10 @@ wire rom_cs          = (snd_A >= 16'hD000);        // $D000-$FFFF (12KB)
 //       if (snd_rst)      bus_phase <= 2'd0;
 //       else if (snd_cen) bus_phase <= bus_phase + 2'd1;
 //   wire bus_commit = snd_cen & (bus_phase == 2'd3);
-//   wire sndpia2_en = bus_commit & sndpia2_cs_addr;
+//   wire sndpia2_en = bus_commit & sndpia2_cs_addr;   (today: bus_commit would be the PIAs' ce)
 //   wire sndpia1_en = bus_commit & sndpia1_cs_addr;
-wire sndpia2_en = snd_cen & sndpia2_cs_addr;
-wire sndpia1_en = snd_cen & sndpia1_cs_addr;
+// The PIAs take snd_cen as their ce and the address decode as cs: they act on
+// snd_cen & cs, the same pulses as before.
 
 // ---------------------------------------------------------------------------
 // TMS5200 clock enable — 625 kHz from 20 MHz (/32)
@@ -201,31 +205,33 @@ wire       sndpia1_ca2_o, sndpia1_ca2_oe;
 wire       sndpia1_cb2_o, sndpia1_cb2_oe;
 wire       sndpia1_irqa,  sndpia1_irqb;
 
-pia6821_sv sndpia1 (
-    .clk      (clk_20m),
-    .rst      (snd_rst),
-    .cs       (sndpia1_en),
-    .rw       (snd_rw),
-    .addr     (snd_A[1:0]),
-    .data_in  (snd_Dout),
-    .data_out (sndpia1_dout),
-    .irqa     (sndpia1_irqa),
-    .irqb     (sndpia1_irqb),
-    .pa_i     (snd_data_in),      // data from data CPU
-    .pa_o     (sndpia1_pa_o),
-    .pa_oe    (sndpia1_pa_oe),
-    .ca1      (snd_irq_from_cpu), // CA2 from data CPU sndPIA0
-    .ca2_i    (1'b1),
-    .ca2_o    (sndpia1_ca2_o),
-    .ca2_oe   (sndpia1_ca2_oe),
-    .pb_i     (8'h00),
-    .pb_o     (sndpia1_pb_o),     // 8-bit DAC value
-    .pb_oe    (sndpia1_pb_oe),
-    .cb1      (1'b0),
-    .cb2_i    (1'b1),
-    .cb2_o    (sndpia1_cb2_o),
-    .cb2_oe   (sndpia1_cb2_oe)
-);
+// Pool pia6821[0]. pa_pins = 0: port A output bits read back the latch.
+assign pia_i[0].rst     = snd_rst;
+assign pia_i[0].ce      = snd_cen;
+assign pia_i[0].cs      = sndpia1_cs_addr;
+assign pia_i[0].rw      = snd_rw;
+assign pia_i[0].rs      = snd_A[1:0];
+assign pia_i[0].din     = snd_Dout;
+assign pia_i[0].pa_i    = snd_data_in;
+assign pia_i[0].pa_pins = 1'b0;
+assign pia_i[0].ca1     = snd_irq_from_cpu;
+assign pia_i[0].ca2_i   = 1'b1;
+assign pia_i[0].pb_i    = 8'h00;
+assign pia_i[0].cb1     = 1'b0;
+assign pia_i[0].cb2_i   = 1'b1;
+
+// The board sees pin levels: port bits read 0 while configured as inputs, CA2 / CB2 0 while inputs.
+assign sndpia1_dout   = pia_o[0].dout;
+assign sndpia1_irqa   = pia_o[0].irqa;
+assign sndpia1_irqb   = pia_o[0].irqb;
+assign sndpia1_pa_o   = pia_o[0].pa_o & pia_o[0].pa_oe;     // to data CPU
+assign sndpia1_pa_oe  = pia_o[0].pa_oe;
+assign sndpia1_pb_o   = pia_o[0].pb_o & pia_o[0].pb_oe;     // 8-bit DAC value
+assign sndpia1_pb_oe  = pia_o[0].pb_oe;
+assign sndpia1_ca2_o  = pia_o[0].ca2_o & pia_o[0].ca2_oe;   // to data CPU sndPIA0 CA1
+assign sndpia1_ca2_oe = pia_o[0].ca2_oe;
+assign sndpia1_cb2_o  = pia_o[0].cb2_o & pia_o[0].cb2_oe;
+assign sndpia1_cb2_oe = pia_o[0].cb2_oe;
 
 assign snd_data_out   = sndpia1_pa_o;
 assign snd_irq_to_cpu = sndpia1_ca2_o;
@@ -251,31 +257,31 @@ wire [7:0]         tms_dout;
 wire               tms_intn, tms_rdyn;
 wire signed [13:0] tms_spkr;
 
-pia6821_sv sndpia2 (
-    .clk      (clk_20m),
-    .rst      (snd_rst),
-    .cs       (sndpia2_en),
-    .rw       (snd_rw),
-    .addr     (snd_A[1:0]),
-    .data_in  (snd_Dout),
-    .data_out (sndpia2_dout),
-    .irqa     (sndpia2_irqa),
-    .irqb     (sndpia2_irqb),
-    .pa_i     (8'hFF),            // port A unused
-    .pa_o     (),
-    .pa_oe    (),
-    .ca1      (tms_intn),         // /INT from TMS5200
-    .ca2_i    (1'b1),
-    .ca2_o    (sndpia2_ca2_o),    // /WS to TMS5200
-    .ca2_oe   (sndpia2_ca2_oe),
-    .pb_i     (tms_dout),         // D0-D7 from TMS5200 (status reads)
-    .pb_o     (sndpia2_pb_o),     // D0-D7 to TMS5200 (command/data writes)
-    .pb_oe    (sndpia2_pb_oe),
-    .cb1      (tms_rdyn),         // /READY from TMS5200
-    .cb2_i    (1'b1),
-    .cb2_o    (sndpia2_cb2_o),    // /RS to TMS5200
-    .cb2_oe   (sndpia2_cb2_oe)
-);
+// Pool pia6821[1]. pa_pins = 0: port A output bits read back the latch.
+assign pia_i[1].rst     = snd_rst;
+assign pia_i[1].ce      = snd_cen;
+assign pia_i[1].cs      = sndpia2_cs_addr;
+assign pia_i[1].rw      = snd_rw;
+assign pia_i[1].rs      = snd_A[1:0];
+assign pia_i[1].din     = snd_Dout;
+assign pia_i[1].pa_i    = 8'hFF;
+assign pia_i[1].pa_pins = 1'b0;
+assign pia_i[1].ca1     = tms_intn;
+assign pia_i[1].ca2_i   = 1'b1;
+assign pia_i[1].pb_i    = tms_dout;
+assign pia_i[1].cb1     = tms_rdyn;
+assign pia_i[1].cb2_i   = 1'b1;
+
+// The board sees pin levels: port bits read 0 while configured as inputs, CA2 / CB2 0 while inputs.
+assign sndpia2_dout   = pia_o[1].dout;
+assign sndpia2_irqa   = pia_o[1].irqa;
+assign sndpia2_irqb   = pia_o[1].irqb;
+assign sndpia2_pb_o   = pia_o[1].pb_o & pia_o[1].pb_oe;     // D0-D7 to TMS5200
+assign sndpia2_pb_oe  = pia_o[1].pb_oe;
+assign sndpia2_ca2_o  = pia_o[1].ca2_o & pia_o[1].ca2_oe;   // /WS to TMS5200
+assign sndpia2_ca2_oe = pia_o[1].ca2_oe;
+assign sndpia2_cb2_o  = pia_o[1].cb2_o & pia_o[1].cb2_oe;   // /RS to TMS5200
+assign sndpia2_cb2_oe = pia_o[1].cb2_oe;
 
 // ---------------------------------------------------------------------------
 // TMS5200 speech chip (using TMS5220 core — functionally equivalent for

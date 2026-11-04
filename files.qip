@@ -8,7 +8,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/Qix.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/Qix_CPU.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/Qix_Video.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/Qix_Sound.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/pia6821_sound.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/pia6821/pia6821.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/qix_display.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/qix_palette.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/qix/qix_vram.sv
@@ -29,7 +29,6 @@ set_global_assignment -name VHDL_FILE rtl/cpu/TMS5220/source/TMS5220.vhd
 # set_global_assignment -name VHDL_FILE rtl/ram_rom/dpram_dc.vhd
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/dpram_dc.sv
 
-set_global_assignment -name VHDL_FILE rtl/custom/pia6821.vhd
 
 # SN76489 PSG (Slither only) - Arnim Laeuger, see rtl/custom/sn76489/COPYING
 set_global_assignment -name VHDL_FILE rtl/custom/sn76489/sn76489_clock_div.vhd

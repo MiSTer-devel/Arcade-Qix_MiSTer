@@ -4,6 +4,7 @@
 // Copyright (C) 2026 Rodimus
 //
 // Hardware: mc6809e + 3× PIA6821 + 1× sndPIA0 + 1KB local RAM + 24KB ROM
+// (CPU and the four PIAs live in the dispatcher's chip pool; this board drives their buses)
 //
 // Responsibilities:
 //   - Game logic CPU (6809E @ ~1.25 MHz, E/Q clocks supplied by top-level)
@@ -64,6 +65,8 @@ module Qix_CPU (
 
     output chip_pool_pkg::m6809r_i_t m6809_i,
     input  chip_pool_pkg::m6809r_o_t m6809_o,
+    output chip_pool_pkg::pia6821_i_t [3:0] pia_i,   // [0] sndPIA0  [1] PIA0  [2] PIA1  [3] PIA2
+    input  chip_pool_pkg::pia6821_o_t [3:0] pia_o,
 
     input         pause,
     input  [7:0]  game_id,
@@ -111,17 +114,15 @@ wire pia2_cs        = (dec_A[15:10] == 6'b10_0111);     // Qix $9C00-$9FFF / Zoo
 wire rom_cs         = is_zookeep ? cpu_A[15]            // Zook $8000-$FFFF (32KB)
                                  : (cpu_A >= 16'hA000); // Qix  $A000-$FFFF (24KB)
 
-// PIA chip-select: single-cycle pulse, one cycle AFTER E-fall.
-//
-// mc6809e updates address/rw at CE_E_FALL. Delaying by one 20MHz cycle
-// ensures the PIA sees cs for exactly one posedge (write) and one negedge
-// (read side-effects / IRQ clearing) per bus cycle. Without this, cs is
-// held for the entire E-cycle (~16 posedges at 20 MHz), causing spurious
-// PIA writes, missed IRQs, and corrupted CA2/CB2 handshake strobes.
+// PIA bus strobe: single-cycle pulse, one cycle AFTER E-fall (the PIAs' ce; cs is
+// the address decode). The PIA acts on ce & cs: exactly one write / read
+// side-effect per bus cycle. Without the strobe, cs is held for the entire
+// E-cycle (~16 clocks at 20 MHz): spurious PIA writes, missed IRQs, and corrupted
+// CA2/CB2 handshake strobes. The pia*_en pulses below feed this board's own
+// register snoops.
 reg ce_E_fall_d;
 always @(posedge clk_20m) ce_E_fall_d <= cpu_E_fall;
 
-wire sndpia_en = ce_E_fall_d & sndpia_cs;
 wire pia0_en   = ce_E_fall_d & pia0_cs;
 wire pia1_en   = ce_E_fall_d & pia1_cs;
 wire pia2_en   = ce_E_fall_d & pia2_cs;
@@ -208,40 +209,42 @@ wire       sndpia_ca2_o, sndpia_ca2_oe;
 wire       sndpia_cb2_o, sndpia_cb2_oe;
 wire       sndpia_irqa, sndpia_irqb;
 
-pia6821 sndpia0 (
-    .clk      (clk_20m),
-    .rst      (reset),
-    .cs       (sndpia_en),
-    .rw       (cpu_RnW),
-    .addr     (cpu_A[1:0]),
-    .data_in  (cpu_Dout),
-    .data_out (sndpia_dout),
-    .irqa     (sndpia_irqa),
-    .irqb     (sndpia_irqb),
-    // Slither: $9000 is not a sound-board PIA. Per schematic DSR 2/2, its port A
-    // is J17 = the player-2 / cocktail control panel, and the data CPU's input
-    // poll reads the player's buttons from HERE whenever $8400 != 0:
-    //     E277: LDX #$9400 / E27A: TST $8400 / E27F: LDX #$9000 / E282: LDA ,X
-    // Feeding it the 6802 reply byte leaves every button dead in that mode. No
-    // separate P2 panel is mapped yet, so mirror the player-1 byte: unchanged in
-    // upright, playable in cocktail.
-    // DIAG-REVERT-2026-08-23: original below, uncomment to restore
-    // .pa_i     (snd_data_in),
-    .pa_i     (is_slither ? p1_input : snd_data_in),
-    .pa_o     (sndpia_pa_o),
-    .pa_oe    (sndpia_pa_oe),
-    .ca1      (snd_irq_from_snd),
-    .ca2_i    (1'b1),
-    .ca2_o    (sndpia_ca2_o),
-    .ca2_oe   (sndpia_ca2_oe),
-    .pb_i     (8'hFF),
-    .pb_o     (sndpia_pb_o),
-    .pb_oe    (sndpia_pb_oe),
-    .cb1      (crtc_vsync),  // (1'b0),
-    .cb2_i    (1'b1),
-    .cb2_o    (sndpia_cb2_o),
-    .cb2_oe   (sndpia_cb2_oe)
-);
+// Pool pia6821[0]. pa_pins = 0: port A output bits read back the latch.
+assign pia_i[0].rst     = reset;
+assign pia_i[0].ce      = ce_E_fall_d;
+assign pia_i[0].cs      = sndpia_cs;
+assign pia_i[0].rw      = cpu_RnW;
+assign pia_i[0].rs      = cpu_A[1:0];
+assign pia_i[0].din     = cpu_Dout;
+// Slither: $9000 is not a sound-board PIA. Per schematic DSR 2/2, its port A
+// is J17 = the player-2 / cocktail control panel, and the data CPU's input
+// poll reads the player's buttons from HERE whenever $8400 != 0:
+//     E277: LDX #$9400 / E27A: TST $8400 / E27F: LDX #$9000 / E282: LDA ,X
+// Feeding it the 6802 reply byte leaves every button dead in that mode. No
+// separate P2 panel is mapped yet, so mirror the player-1 byte: unchanged in
+// upright, playable in cocktail.
+// DIAG-REVERT-2026-08-23: original below, uncomment to restore
+// assign pia_i[0].pa_i    = snd_data_in;
+assign pia_i[0].pa_i    = is_slither ? p1_input : snd_data_in;
+assign pia_i[0].pa_pins = 1'b0;
+assign pia_i[0].ca1     = snd_irq_from_snd;
+assign pia_i[0].ca2_i   = 1'b1;
+assign pia_i[0].pb_i    = 8'hFF;
+assign pia_i[0].cb1     = crtc_vsync;
+assign pia_i[0].cb2_i   = 1'b1;
+
+// The board sees pin levels: port bits read 0 while configured as inputs, CA2 / CB2 0 while inputs.
+assign sndpia_dout   = pia_o[0].dout;
+assign sndpia_irqa   = pia_o[0].irqa;
+assign sndpia_irqb   = pia_o[0].irqb;
+assign sndpia_pa_o   = pia_o[0].pa_o & pia_o[0].pa_oe;
+assign sndpia_pa_oe  = pia_o[0].pa_oe;
+assign sndpia_pb_o   = pia_o[0].pb_o & pia_o[0].pb_oe;
+assign sndpia_pb_oe  = pia_o[0].pb_oe;
+assign sndpia_ca2_o  = pia_o[0].ca2_o & pia_o[0].ca2_oe;
+assign sndpia_ca2_oe = pia_o[0].ca2_oe;
+assign sndpia_cb2_o  = pia_o[0].cb2_o & pia_o[0].cb2_oe;
+assign sndpia_cb2_oe = pia_o[0].cb2_oe;
 
 assign snd_data_out   = sndpia_pa_o;
 assign snd_vol_out    = sndpia_pb_o;
@@ -297,31 +300,26 @@ always @(posedge clk_20m) begin
         mcu_pa_cmd <= cpu_Dout;
 end
 
-pia6821 pia0 (
-    .clk      (clk_20m),
-    .rst      (reset),
-    .cs       (pia0_en),
-    .rw       (cpu_RnW),
-    .addr     (cpu_A[1:0]),
-    .data_in  (cpu_Dout),
-    .data_out (pia0_dout),
-    .irqa     (pia0_irqa),
-    .irqb     (pia0_irqb),
-    .pa_i     (p1_input),
-    .pa_o     (),
-    .pa_oe    (),
-    .ca1      (1'b1),
-    .ca2_i    (1'b1),
-    .ca2_o    (),
-    .ca2_oe   (),
-    .pb_i     (pia0_pb_i),
-    .pb_o     (pia0_pb_o),
-    .pb_oe    (pia0_pb_oe),
-    .cb1      (1'b1),
-    .cb2_i    (1'b1),
-    .cb2_o    (),
-    .cb2_oe   ()
-);
+// Pool pia6821[1]. pa_pins = 1: port A reads its pins, output bits too; the pins are the switches wired-AND the outputs.
+assign pia_i[1].rst     = reset;
+assign pia_i[1].ce      = ce_E_fall_d;
+assign pia_i[1].cs      = pia0_cs;
+assign pia_i[1].rw      = cpu_RnW;
+assign pia_i[1].rs      = cpu_A[1:0];
+assign pia_i[1].din     = cpu_Dout;
+assign pia_i[1].pa_i    = p1_input    & (pia_o[1].pa_o | ~pia_o[1].pa_oe);   // switches pull low only: an output driven low stays low
+assign pia_i[1].pa_pins = 1'b1;
+assign pia_i[1].ca1     = 1'b1;
+assign pia_i[1].ca2_i   = 1'b1;
+assign pia_i[1].pb_i    = pia0_pb_i;
+assign pia_i[1].cb1     = 1'b1;
+assign pia_i[1].cb2_i   = 1'b1;
+
+assign pia0_dout  = pia_o[1].dout;
+assign pia0_irqa  = pia_o[1].irqa;
+assign pia0_irqb  = pia_o[1].irqb;
+assign pia0_pb_o  = pia_o[1].pb_o & pia_o[1].pb_oe;   // pin level: 0 while an input
+assign pia0_pb_oe = pia_o[1].pb_oe;
 
 // DIAG-REVERT-2026-06-15: START1-seen probe (delete this whole block to revert).
 // Latches HIGH the first time the 6809 reads PIA0 PA (offset 0) and gets bit4=0
@@ -394,9 +392,8 @@ wire pia2_pb_wr = pia2_en & ~cpu_RnW & (cpu_A[1:0] == 2'b10) & pia2_crb_psel;
 
 // ---------------------------------------------------------------------------
 // 2x SN76489 (Slither). Data bus = PIA port B output latch; /WE derived from the
-// port-B data write rather than cb2_out, because pia6821.vhd clocks cb2_out on
-// the FALLING edge of clk_20m (the mixed-edge pattern qix-fpga-fixes.md flags as
-// a synthesis hazard). Same instant, same byte, one clock domain.
+// port-B data write rather than cb2_out (written when the old pia6821.vhd clocked
+// cb2_out on the falling edge of clk_20m). Same instant, same byte.
 //
 // ready_o (low while the chip is busy) drives CB1: its rising edge is the
 // low-to-high transition the $F9DE poll waits on.
@@ -505,33 +502,27 @@ sn76489_wrap sn2 (
 wire pia1_cb1 = is_slither ? sn1_ready : 1'b1;
 wire pia2_cb1 = is_slither ? sn2_ready : 1'b1;
 
-pia6821 pia1 (
-    .clk      (clk_20m),
-    .rst      (reset),
-    .cs       (pia1_en),
-    .rw       (cpu_RnW),
-    .addr     (cpu_A[1:0]),
-    .data_in  (cpu_Dout),
-    .data_out (pia1_dout),
-    .irqa     (pia1_irqa),
-    .irqb     (pia1_irqb),
-    .pa_i     (spare_input),
-    .pa_o     (),
-    .pa_oe    (),
-    .ca1      (1'b1),
-    .ca2_i    (1'b1),
-    .ca2_o    (),
-    .ca2_oe   (),
-    .pb_i     (in0_input),
-    .pb_o     (pia1_pb_o),
-    .pb_oe    (),
-    // DIAG-REVERT-2026-08-23: original below, uncomment to restore
-    // .cb1      (1'b1),
-    .cb1      (pia1_cb1),   // DIAG: Slither SN76489 /READY handshake
-    .cb2_i    (1'b1),
-    .cb2_o    (),
-    .cb2_oe   ()
-);
+// Pool pia6821[2]. pa_pins = 1: port A reads its pins, output bits too; the pins are the switches wired-AND the outputs.
+assign pia_i[2].rst     = reset;
+assign pia_i[2].ce      = ce_E_fall_d;
+assign pia_i[2].cs      = pia1_cs;
+assign pia_i[2].rw      = cpu_RnW;
+assign pia_i[2].rs      = cpu_A[1:0];
+assign pia_i[2].din     = cpu_Dout;
+assign pia_i[2].pa_i    = spare_input & (pia_o[2].pa_o | ~pia_o[2].pa_oe);   // switches pull low only: an output driven low stays low
+assign pia_i[2].pa_pins = 1'b1;
+assign pia_i[2].ca1     = 1'b1;
+assign pia_i[2].ca2_i   = 1'b1;
+assign pia_i[2].pb_i    = in0_input;
+// DIAG-REVERT-2026-08-23: original below, uncomment to restore
+// assign pia_i[2].cb1     = 1'b1;
+assign pia_i[2].cb1     = pia1_cb1;   // DIAG: Slither SN76489 /READY handshake
+assign pia_i[2].cb2_i   = 1'b1;
+
+assign pia1_dout  = pia_o[2].dout;
+assign pia1_irqa  = pia_o[2].irqa;
+assign pia1_irqb  = pia_o[2].irqb;
+assign pia1_pb_o  = pia_o[2].pb_o & pia_o[2].pb_oe;   // pin level: 0 while an input
 
 // ---------------------------------------------------------------------------
 // PIA2 ($9C00-$9FFF) — player 2 joystick + coin counters/lockout
@@ -540,33 +531,28 @@ wire [7:0] pia2_dout;
 wire       pia2_irqa, pia2_irqb;
 wire [7:0] pia2_pb_o, pia2_pb_oe;
 
-pia6821 pia2 (
-    .clk      (clk_20m),
-    .rst      (reset),
-    .cs       (pia2_en),
-    .rw       (cpu_RnW),
-    .addr     (cpu_A[1:0]),
-    .data_in  (cpu_Dout),
-    .data_out (pia2_dout),
-    .irqa     (pia2_irqa),
-    .irqb     (pia2_irqb),
-    .pa_i     (p2_input),
-    .pa_o     (),
-    .pa_oe    (),
-    .ca1      (1'b1),
-    .ca2_i    (1'b1),
-    .ca2_o    (),
-    .ca2_oe   (),
-    .pb_i     (8'h00),
-    .pb_o     (pia2_pb_o),  // bit 2 → MCU IRQ, bit 3 → MCU PC[3] (coinctrl)
-    .pb_oe    (pia2_pb_oe),
-    // DIAG-REVERT-2026-08-23: original below, uncomment to restore
-    // .cb1      (1'b1),
-    .cb1      (pia2_cb1),   // DIAG: Slither SN76489 /READY handshake
-    .cb2_i    (1'b1),
-    .cb2_o    (),
-    .cb2_oe   ()
-);
+// Pool pia6821[3]. pa_pins = 1: port A reads its pins, output bits too; the pins are the switches wired-AND the outputs.
+assign pia_i[3].rst     = reset;
+assign pia_i[3].ce      = ce_E_fall_d;
+assign pia_i[3].cs      = pia2_cs;
+assign pia_i[3].rw      = cpu_RnW;
+assign pia_i[3].rs      = cpu_A[1:0];
+assign pia_i[3].din     = cpu_Dout;
+assign pia_i[3].pa_i    = p2_input    & (pia_o[3].pa_o | ~pia_o[3].pa_oe);   // switches pull low only: an output driven low stays low
+assign pia_i[3].pa_pins = 1'b1;
+assign pia_i[3].ca1     = 1'b1;
+assign pia_i[3].ca2_i   = 1'b1;
+assign pia_i[3].pb_i    = 8'h00;
+// DIAG-REVERT-2026-08-23: original below, uncomment to restore
+// assign pia_i[3].cb1     = 1'b1;
+assign pia_i[3].cb1     = pia2_cb1;   // DIAG: Slither SN76489 /READY handshake
+assign pia_i[3].cb2_i   = 1'b1;
+
+assign pia2_dout  = pia_o[3].dout;
+assign pia2_irqa  = pia_o[3].irqa;
+assign pia2_irqb  = pia_o[3].irqb;
+assign pia2_pb_o  = pia_o[3].pb_o & pia_o[3].pb_oe;   // pin level: 0 while an input; bit 2 → MCU IRQ, bit 3 → MCU PC[3] (coinctrl)
+assign pia2_pb_oe = pia_o[3].pb_oe;
 
 // ---------------------------------------------------------------------------
 // Data CPU ROM — sized for the largest variant on the platform.
@@ -629,8 +615,8 @@ end
 // MCU port inputs derived from coin_input and PIA2 coinctrl.
 // PIA2 PB pin values as seen by the MCU. For bits configured as input
 // (DDR=0, oe=0), the pin floats high through pull-ups. For output bits,
-// the pin reflects the latch. pia2_pb_o reads 0 for input bits in this
-// PIA model, so we must explicitly OR-in the pull-up state.
+// the pin reflects the latch. pia2_pb_o reads 0 for input bits (masked
+// at the PIA2 bus above), so we must explicitly OR-in the pull-up state.
 wire [7:0] pia2_pb_pin = pia2_pb_o | ~pia2_pb_oe;
 
 wire [7:0] mcu_pb_in = {3'b000, coin_input[7], coin_input[3:0]};

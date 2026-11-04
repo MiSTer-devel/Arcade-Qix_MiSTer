@@ -63,6 +63,10 @@ module Qix_Video (
 
     output chip_pool_pkg::m6809r_i_t m6809_i,
     input  chip_pool_pkg::m6809r_o_t m6809_o,
+    output ram_pool_pkg::pram_i_t    nv_pr_i,     // RAM pool block 0: NVRAM
+    input  ram_pool_pkg::pram_o_t    nv_pr_o,
+    output ram_pool_pkg::pram_i_t    vram_pr_i,   // RAM pool block 1: VRAM
+    input  ram_pool_pkg::pram_o_t    vram_pr_o,
 
     input         pause,
     input         flip,
@@ -258,6 +262,8 @@ qix_vram vram (
     // Scanline latch inputs from CRTC
     .crtc_ma        (crtc_ma),
     .crtc_ra        (crtc_ra),
+    .pr_i           (vram_pr_i),
+    .pr_o           (vram_pr_o),
     .crtc_de        (crtc_de),
     .scanline_latch (scanline_latch)
 );
@@ -330,24 +336,19 @@ assign crtc_vsync = vsync_cpu;
 // ---------------------------------------------------------------------------
 // NVRAM — 1KB BRAM ($8400-$87FF)
 // Port A: Video CPU  |  Port B: hiscore framework
-// Explicit dpram_dc for reliable M10K inference.
+// Storage: RAM pool block 0 in the dispatcher.
 // ---------------------------------------------------------------------------
 wire [7:0] nvram_cpu_dout;
 wire [7:0] nvram_hs_dout;
 
-dpram_dc #(.widthad_a(10)) nvram_inst (
-    .clock_a    (clk_20m),
-    .address_a  (cpu_A[9:0]),
-    .data_a     (cpu_Dout),
-    .wren_a     (nvram_cs & cpu_wr),
-    .q_a        (nvram_cpu_dout),
-
-    .clock_b    (clk_20m),
-    .address_b  (hs_address[9:0]),
-    .data_b     (hs_data_in),
-    .wren_b     (hs_write),
-    .q_b        (nvram_hs_dout)
-);
+assign nv_pr_i.a_addr = {6'd0, cpu_A[9:0]};
+assign nv_pr_i.a_d    = cpu_Dout;
+assign nv_pr_i.a_we   = nvram_cs & cpu_wr;
+assign nv_pr_i.b_addr = {6'd0, hs_address[9:0]};
+assign nv_pr_i.b_d    = hs_data_in;
+assign nv_pr_i.b_we   = hs_write;
+assign nvram_cpu_dout = nv_pr_o.a_q;
+assign nvram_hs_dout  = nv_pr_o.b_q;
 
 assign hs_data_out = nvram_hs_dout;
 

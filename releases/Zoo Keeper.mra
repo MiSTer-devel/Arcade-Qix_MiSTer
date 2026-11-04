@@ -12,7 +12,7 @@
     <region>World</region>
 	<category>Arcade</category>
 
-    <buttons names="Jump,-,Test Advance,-,Coin,Start 1P,Start 2P,Pause" default="A,X,Select,Start,R,L"/>
+    <buttons names="Jump,-,Test Advance,-,Coin,Start 1P,Start 2P,Pause,-,-,-,-,Test Next Line,Test Slew Up,Test Slew Down" default="A,X,Select,Start,R,L"/>
 
     <!-- Index 1: Config -->
     <rom index="1">

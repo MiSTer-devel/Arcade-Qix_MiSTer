@@ -11,7 +11,7 @@
     <region>World</region>
     <category>Maze</category>
 
-    <buttons names="-,-,Test Advance,Start 2P,Coin,Start 1P,Jump,Pause" default="X,Y,Select,Start,R,L"/>
+    <buttons names="Jump,-,Test Advance,-,Coin,Start 1P,Start 2P,Pause,R Right,R Left,R Down,R Up,Test Next Line,Test Slew Up,Test Slew Down" default="R,,Select,Start,,L,A,Y,B,X"/>
 
     <!-- Index 0: ROM -->
     <rom index="0" zip="complexx.zip" md5="none">

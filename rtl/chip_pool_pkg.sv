@@ -877,7 +877,8 @@ typedef struct packed {
 
 // Exidy's own chip models (rtl/sound/). rst is on every bus: each board drives its own reset (sound board snd_rst,
 // Car Polo reset | ~cp, Star Fire reset | ~sf), so a pooled chip behaves exactly as the board's private copy did.
-// MC6821 PIA (pia6821)
+// MC6821 PIA (pia6821). ce = one-clock bus strobe, cs = address decode. pa_pins: 1 = port A reads the pins for
+// output bits too, 0 = port A output bits read back the latch.
 typedef struct packed {
     logic        rst;
     logic        ce;
@@ -886,6 +887,7 @@ typedef struct packed {
     logic  [1:0] rs;
     logic  [7:0] din;
     logic  [7:0] pa_i;
+    logic        pa_pins;
     logic        ca1;
     logic        ca2_i;
     logic  [7:0] pb_i;
@@ -1035,38 +1037,6 @@ typedef struct packed {
     logic        cruclk;
     logic        holda;
 } tms9900_o_t;
-
-// MC6821 PIA (pia6821 with pa_pins: 1 = port A reads the pins for output bits too).
-// Pins as pia6821_i_t plus pa_pins; the outputs are pia6821_o_t's. rst is on the bus: each board drives its own reset.
-typedef struct packed {
-    logic        rst;
-    logic        ce;
-    logic        cs;
-    logic        rw;                    // 1 = read
-    logic  [1:0] rs;
-    logic  [7:0] din;
-    logic  [7:0] pa_i;
-    logic        pa_pins;
-    logic        ca1;
-    logic        ca2_i;
-    logic  [7:0] pb_i;
-    logic        cb1;
-    logic        cb2_i;
-} pia6821p_i_t;
-
-typedef struct packed {
-    logic  [7:0] dout;
-    logic        irqa;
-    logic        irqb;
-    logic  [7:0] pa_o;
-    logic  [7:0] pa_oe;
-    logic        ca2_o;
-    logic        ca2_oe;
-    logic  [7:0] pb_o;
-    logic  [7:0] pb_oe;
-    logic        cb2_o;
-    logic        cb2_oe;
-} pia6821p_o_t;
 
 // HC-55516 CVSD decoder (hc55516): clock and digit are pin levels; rst is on the bus (the board holds it while it has no speech)
 typedef struct packed {
@@ -1529,6 +1499,46 @@ typedef struct packed {
     logic        lock_n;
     logic [19:0] ad;                    // AD19-AD0 as driven this clock (trace / debug)
 } i8088_o_t;
+
+
+// Intel 8086 (x86sv, rtl/x86sv_fleet.sv x86sv_i8086): max-mode 16-bit bus, one CPU clock per ce, 8288 commands.
+// Byte lanes: AD7-0 active when addr[0] = 0, AD15-8 active when bhe_n = 0; a word at an odd address is two cycles.
+typedef struct packed {
+    logic        reset;                 // >= 4 ce
+    logic        ce;                    // one 8086 clock
+    logic        ready;                 // READY: low in T3 / Tw inserts a wait state
+    logic        intr;
+    logic        nmi;                   // rising edge
+    logic        test_n;                // WAIT input
+    logic [15:0] din;                   // read data (both lanes; INTA type on AD7-0), taken in the T3 / Tw with ready high
+} i8086_i_t;
+typedef struct packed {
+    logic [19:0] addr;                  // address of the current bus cycle (ALE latch), valid T1-T4
+    logic  [2:0] cyc;                   // S2-S0 of the current bus cycle, valid T1-T4
+    logic        bhe_n;                 // BHE of the current bus cycle (ALE latch), valid T1-T4
+    logic        ale;
+    logic  [2:0] s;                     // S2-S0 pins (8288 timing; 111 passive)
+    logic  [1:0] seg;                   // S4-S3
+    logic [15:0] dout;                  // write data on its lane(s), valid T2-T4
+    logic        mrdc_n;                // 8288 commands, active low, T2-T3-Tw
+    logic        amwc_n;
+    logic        mwtc_n;
+    logic        iorc_n;
+    logic        aiowc_n;
+    logic        iowc_n;
+    logic        inta_n;
+    logic  [1:0] qs;                    // QS1-QS0
+    logic        lock_n;
+    logic [19:0] ad;                    // AD19-AD0 as driven this clock (trace / debug)
+} i8086_o_t;
+
+// NEC V20 (uPD70108) native mode: same max-mode pins as the 8088 (x86sv_v20)
+typedef i8088_i_t v20_i_t;
+typedef i8088_o_t v20_o_t;
+
+// NEC V30 (uPD70116) native mode: same max-mode pins as the 8086 (x86sv_v30)
+typedef i8086_i_t v30_i_t;
+typedef i8086_o_t v30_o_t;
 
 // Votrax SC-01 / SC-01A (rtl/sound/sc01, ours); the internal ROM is a dispatcher ROM block
 typedef struct packed {

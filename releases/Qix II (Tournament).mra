@@ -11,7 +11,7 @@
     <region>World</region>
     <category>Maze</category>
 
-    <buttons names="Draw Fast,Draw Slow,Test Advance,-,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Select,Start,R,L"/>
+    <buttons names="Draw Fast,Draw Slow,Test Advance,-,Coin,Start 1P,Start 2P,Pause,-,-,-,-,Test Next Line,Test Slew Up,Test Slew Down" default="A,B,X,Select,Start,R,L"/>
 
     <!-- Index 0: ROM -->
     <rom index="0" zip="qix.zip|qix2.zip" md5="none">
