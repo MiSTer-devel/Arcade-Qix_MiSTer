@@ -39,9 +39,9 @@ module Qix_CPU (
     input  [7:0]  in0_input,      // PIA1 port B: spare (unused on base Qix)
     input  [7:0]  p2_input,       // PIA2 port A: player 2 joystick
 
-    // Slither PSG audio — 2x SN76489 hung off PIA1/PIA2 port B (game_id 5 only)
-    output [7:0]  sn1_audio,      // signed
-    output [7:0]  sn2_audio,      // signed
+    // Slither PSGs — 2x SN76489 hung off PIA1/PIA2 port B (game_id 5 only): pool sn76489[0..1]
+    output chip_pool_pkg::sn76489_i_t [1:0] sn_i,
+    input  chip_pool_pkg::sn76489_o_t [1:0] sn_o,
 
     // Sound PIA interface (to/from Qix_Sound)
     output [7:0]  snd_data_out,   // sndPIA0 port A output → sound CPU
@@ -53,25 +53,27 @@ module Qix_CPU (
 
     input         crtc_vsync,    // CRTC VSYNC → sndPIA0 CB1 (frame timing)
 
-    // ROM loading (MiSTer ioctl — pre-gated by address range in Qix.sv)
-    input  [24:0] ioctl_addr,
-    input  [7:0]  ioctl_data,
-    input         ioctl_wr,
+    // Data CPU ROM: ROM block 0 in the dispatcher (loaded there from the ROM download)
+    output [15:0] rom_a,
+    input  [7:0]  rom_d,
 
     // MCU EPROM loading (ioctl_index == 2, 2KB)
     input  [10:0] mcu_rom_addr,
     input  [7:0]  mcu_rom_data,
     input         mcu_rom_wr,
 
+    output chip_pool_pkg::mc68705p3_i_t mcu_i,     // chip pool: MCU
+    input  chip_pool_pkg::mc68705p3_o_t mcu_o,
+
     output chip_pool_pkg::m6809r_i_t m6809_i,
     input  chip_pool_pkg::m6809r_o_t m6809_o,
     output chip_pool_pkg::pia6821_i_t [3:0] pia_i,   // [0] sndPIA0  [1] PIA0  [2] PIA1  [3] PIA2
     input  chip_pool_pkg::pia6821_o_t [3:0] pia_o,
+    output ram_pool_pkg::pram_i_t    lr_pr_i,        // RAM pool block 3: local RAM
+    input  ram_pool_pkg::pram_o_t    lr_pr_o,
 
     input         pause,
-    input  [7:0]  game_id,
-    // DIAG-REVERT-2026-06-15: START1-seen probe out (delete this line + the comma after game_id to revert)
-    output        dbg_start1_led
+    input  [7:0]  game_id
 );
 
 // ---------------------------------------------------------------------------
@@ -183,17 +185,17 @@ assign shared_we   = shared_cs & cpu_wr;
 assign shared_cs_o = shared_cs;
 
 // ---------------------------------------------------------------------------
-// Local RAM — 1KB BRAM ($8400-$87FF)
+// Local RAM — 1KB ($8400-$87FF). Storage: RAM pool block 3 in the dispatcher (port B unused).
 // ---------------------------------------------------------------------------
-reg [7:0] local_ram [0:1023];
-initial for (integer i = 0; i < 1024; i = i + 1) local_ram[i] = 8'h00;
-reg [7:0] local_ram_dout;
+wire [7:0] local_ram_dout;
 
-always @(posedge clk_20m) begin
-    if (local_cs & cpu_wr)
-        local_ram[cpu_A[9:0]] <= cpu_Dout;
-    local_ram_dout <= local_ram[cpu_A[9:0]];
-end
+assign lr_pr_i.a_addr = {6'd0, cpu_A[9:0]};
+assign lr_pr_i.a_d    = cpu_Dout;
+assign lr_pr_i.a_we   = local_cs & cpu_wr;
+assign lr_pr_i.b_addr = 16'd0;
+assign lr_pr_i.b_d    = 8'd0;
+assign lr_pr_i.b_we   = 1'b0;
+assign local_ram_dout = lr_pr_o.a_q;
 
 // ---------------------------------------------------------------------------
 // sndPIA0 ($9000-$93FF) — data CPU ↔ sound CPU
@@ -223,8 +225,6 @@ assign pia_i[0].din     = cpu_Dout;
 // Feeding it the 6802 reply byte leaves every button dead in that mode. No
 // separate P2 panel is mapped yet, so mirror the player-1 byte: unchanged in
 // upright, playable in cocktail.
-// DIAG-REVERT-2026-08-23: original below, uncomment to restore
-// assign pia_i[0].pa_i    = snd_data_in;
 assign pia_i[0].pa_i    = is_slither ? p1_input : snd_data_in;
 assign pia_i[0].pa_pins = 1'b0;
 assign pia_i[0].ca1     = snd_irq_from_snd;
@@ -261,10 +261,9 @@ wire [7:0] pia0_dout;
 wire       pia0_irqa, pia0_irqb;
 wire [7:0] pia0_pb_o, pia0_pb_oe;
 
-// MCU games: latched MCU PA output feeds PIA0 PB input, mirroring MAME's
-// coin_r which returns m_68705_porta_out (captured by mcu_porta_w callback).
-// Initialized to 0xFF (all inactive, active-low) so the 6809 sees no spurious
-// coins/credits before the MCU has run its first IRQ handler.
+// MCU games: the MCU's latched port A output feeds the PIA0 PB input (coin_r returns the MCU port A latch).
+// Starts at 0xFF (all inactive, active-low) so the 6809 sees no spurious coins / credits before the MCU's
+// first IRQ handler.
 wire [7:0] mcu_pa_out;
 reg  [7:0] mcu_porta_cache = 8'hFF;
 
@@ -277,11 +276,10 @@ end
 
 wire [7:0] pia0_pb_i = is_mcu_game ? mcu_porta_cache : coin_input;
 
-// MCU PA input latch: mirrors MAME's coin_w (PIA0 writepb_handler) — fires ONLY on
-// true PB *port* writes (CRB bit2=1), NOT on DDRB writes (CRB bit2=0). $FEE4 stores the
-// command to PB then writes DDRB=$FF to the SAME addr $1402; the ungated snoop latched
-// that $FF → MCU dispatched on $FF → wrong reply → data reset cascade (ZK black loop).
-// CRB-GATE-FIX-2026-06-13: track PIA0 CRB bit2 (offset-3 writes) and gate the latch on it.
+// MCU PA input latch (coin_w): fires only on PB port writes (CRB bit 2 = 1), not on DDRB writes (CRB bit 2 = 0).
+// $FEE4 stores the command to PB, then writes DDRB = $FF to the same address $1402; latching that $FF makes the
+// MCU dispatch on $FF (wrong reply, data CPU reset loop, Zoo Keeper black screen). So track PIA0 CRB bit 2
+// (offset-3 writes) and gate the latch on it.
 reg pia0_crb_psel = 1'b0;   // mirror of PIA0 CRB bit2 (1 = PB port selected)
 always @(posedge clk_20m) begin
     if (reset)
@@ -294,8 +292,6 @@ reg [7:0] mcu_pa_cmd = 8'hFF;
 always @(posedge clk_20m) begin
     if (reset)
         mcu_pa_cmd <= 8'hFF;
-    // CRB-GATE-FIX-2026-06-13: original ungated line below (restore to revert the fix):
-    // else if (is_mcu_game && pia0_en && ~cpu_RnW && (cpu_A[1:0] == 2'b10))
     else if (is_mcu_game && pia0_en && ~cpu_RnW && (cpu_A[1:0] == 2'b10) && pia0_crb_psel)
         mcu_pa_cmd <= cpu_Dout;
 end
@@ -320,19 +316,6 @@ assign pia0_irqa  = pia_o[1].irqa;
 assign pia0_irqb  = pia_o[1].irqb;
 assign pia0_pb_o  = pia_o[1].pb_o & pia_o[1].pb_oe;   // pin level: 0 while an input
 assign pia0_pb_oe = pia_o[1].pb_oe;
-
-// DIAG-REVERT-2026-06-15: START1-seen probe (delete this whole block to revert).
-// Latches HIGH the first time the 6809 reads PIA0 PA (offset 0) and gets bit4=0
-// AND bit7=1 — i.e. ZooKeeper START1 pressed on a real PA-data read. (DDRA=$00 reads
-// back as $00 → bit7=0, so a DDR read can't false-trigger.) Sticky; clears on reset.
-wire dbg_start1_seen = pia0_en & cpu_RnW & (cpu_A[1:0]==2'b00)
-                       & ~pia0_dout[4] & pia0_dout[7];
-reg  dbg_start1_latch = 1'b0;
-always @(posedge clk_20m) begin
-    if (reset)                dbg_start1_latch <= 1'b0;
-    else if (dbg_start1_seen) dbg_start1_latch <= 1'b1;
-end
-assign dbg_start1_led = dbg_start1_latch;
 
 // ---------------------------------------------------------------------------
 // PIA1 ($9800-$9BFF) — spare inputs (unused on base Qix)
@@ -369,34 +352,10 @@ end
 wire pia1_pb_wr = pia1_en & ~cpu_RnW & (cpu_A[1:0] == 2'b10) & pia1_crb_psel;
 wire pia2_pb_wr = pia2_en & ~cpu_RnW & (cpu_A[1:0] == 2'b10) & pia2_crb_psel;
 
-// DIAG-REVERT-2026-08-23: /READY stand-in that got Slither booting (HW-confirmed
-// 2026-08-23, boots to the operator menu). Superseded below by the real SN76489,
-// whose ready_o drives CB1. Uncomment this and comment the PSG block to get back
-// to the known-good booting state without the PSGs.
-// localparam [8:0] SN_BUSY = 9'd320;   // ~16us at 20 MHz
-// reg [8:0] sn1_busy = 9'd0;
-// reg [8:0] sn2_busy = 9'd0;
-// always @(posedge clk_20m) begin
-//     if (reset) begin
-//         sn1_busy <= 9'd0;
-//         sn2_busy <= 9'd0;
-//     end else begin
-//         if (pia1_pb_wr)             sn1_busy <= SN_BUSY;
-//         else if (sn1_busy != 9'd0)  sn1_busy <= sn1_busy - 9'd1;
-//         if (pia2_pb_wr)             sn2_busy <= SN_BUSY;
-//         else if (sn2_busy != 9'd0)  sn2_busy <= sn2_busy - 9'd1;
-//     end
-// end
-// wire pia1_cb1 = is_slither ? (sn1_busy == 9'd0) : 1'b1;
-// wire pia2_cb1 = is_slither ? (sn2_busy == 9'd0) : 1'b1;
-
 // ---------------------------------------------------------------------------
-// 2x SN76489 (Slither). Data bus = PIA port B output latch; /WE derived from the
-// port-B data write rather than cb2_out (written when the old pia6821.vhd clocked
-// cb2_out on the falling edge of clk_20m). Same instant, same byte.
-//
-// ready_o (low while the chip is busy) drives CB1: its rising edge is the
-// low-to-high transition the $F9DE poll waits on.
+// 2x SN76489 (Slither), pool sn76489[0..1] (chips-repo sn76489sv, VARIANT 0). Data bus = PIA port B output latch;
+// /WE (= /CE) derived from the port-B data write rather than cb2_out. READY (low for 32 PSG clocks after a write)
+// drives CB1: its rising edge is the low-to-high transition the $F9DE poll waits on.
 //
 // ⚠️ SN_CLK_HZ is a BEST GUESS. SLITHER_CLOCK_OSC is referenced at qix.cpp:737
 // but not defined in our (truncated) copy of the driver. The vault records the
@@ -405,40 +364,20 @@ wire pia2_pb_wr = pia2_en & ~cpu_RnW & (cpu_A[1:0] == 2'b10) & pia2_crb_psel;
 // ---------------------------------------------------------------------------
 localparam [24:0] SN_CLK_HZ = 25'd1_340_000;
 
+// Pause freezes the PSGs (accumulator, clock enable and write handshake), as the sound board freezes snd_cen:
+// a frozen tone generator holds its level, so a note in progress stops instead of ringing on.
 reg [24:0] sn_acc = 25'd0;
-wire       sn_cen = (sn_acc >= 25'd20_000_000);
+wire       sn_cen = (sn_acc >= 25'd20_000_000) & ~pause;
 always @(posedge clk_20m) begin
-    if (sn_cen) sn_acc <= sn_acc - 25'd20_000_000 + SN_CLK_HZ;
-    else        sn_acc <= sn_acc + SN_CLK_HZ;
+    if (pause)       sn_acc <= sn_acc;
+    else if (sn_cen) sn_acc <= sn_acc - 25'd20_000_000 + SN_CLK_HZ;
+    else             sn_acc <= sn_acc + SN_CLK_HZ;
 end
-
-// SN-WE-HANDSHAKE-2026-09-23: the fixed 88-clk /WE window below was SHORTER than the PSG's
-// write-sampling tick (sn76489_latch_ctrl samples on the internal /16 enable = one per ~239 clk),
-// so ~63% of writes were dropped while READY still handshook (ready_o is forced '1' whenever
-// /CE is high) -> game runs, PSGs silent. Now /WE is held from the port-B write until the PSG
-// raises READY, like the real PIA CB2 write-strobe / CB1 handshake. Original below.
-// // /WE strobe: 8 clk of setup after the PIA latches port B, then ~88 clk (4.4us)
-// // low — several sn_cen edges, so the synchronous PSG cannot miss it.
-// reg [6:0] sn1_wr_cnt = 7'd0;
-// reg [6:0] sn2_wr_cnt = 7'd0;
-// always @(posedge clk_20m) begin
-//     if (reset) begin
-//         sn1_wr_cnt <= 7'd0;
-//         sn2_wr_cnt <= 7'd0;
-//     end else begin
-//         if (pia1_pb_wr)              sn1_wr_cnt <= 7'd96;
-//         else if (sn1_wr_cnt != 7'd0) sn1_wr_cnt <= sn1_wr_cnt - 7'd1;
-//         if (pia2_pb_wr)              sn2_wr_cnt <= 7'd96;
-//         else if (sn2_wr_cnt != 7'd0) sn2_wr_cnt <= sn2_wr_cnt - 7'd1;
-//     end
-// end
-// wire sn1_we_n = ~((sn1_wr_cnt != 7'd0) & (sn1_wr_cnt <= 7'd88));
-// wire sn2_we_n = ~((sn2_wr_cnt != 7'd0) & (sn2_wr_cnt <= 7'd88));
 
 wire sn1_ready, sn2_ready;
 
-// Per PSG: 8 clk data setup, then /WE low until READY rises (write taken), with a
-// ~2k-clk timeout so a PSG that never answers cannot wedge the CPU's CB1 poll.
+// Per PSG: 8 clk data setup, then /WE low until READY is high (the PSG drops it the clock after it takes the write),
+// with a ~2k-clk timeout so a PSG that never answers cannot wedge the CPU's CB1 poll.
 reg  [3:0]  sn1_setup = 4'd0,  sn2_setup = 4'd0;
 reg         sn1_wr_act = 1'b0, sn2_wr_act = 1'b0;
 reg  [10:0] sn1_tmo = 11'd0,   sn2_tmo = 11'd0;
@@ -446,7 +385,7 @@ always @(posedge clk_20m) begin
     if (reset) begin
         sn1_setup <= 4'd0; sn1_wr_act <= 1'b0; sn1_tmo <= 11'd0;
         sn2_setup <= 4'd0; sn2_wr_act <= 1'b0; sn2_tmo <= 11'd0;
-    end else begin
+    end else if (!pause) begin
         if (pia1_pb_wr) begin
             sn1_setup <= 4'd8; sn1_wr_act <= 1'b0;
         end else if (sn1_setup != 4'd0) begin
@@ -470,33 +409,18 @@ end
 wire sn1_we_n = ~sn1_wr_act;
 wire sn2_we_n = ~sn2_wr_act;
 
-// /CE must be part of the bus access, NOT tied low. sn76489_latch_ctrl.vhd:134
-// drives `ready_o <= ready_q when ce_n_i = '0' else '1'`, and ready_q is cleared
-// only by the `elsif ce_n_i = '1'` branch — so a permanently-low /CE latches READY
-// high after the very first write and never produces another rising edge. Driving
-// /CE with the strobe gives one clean high->low->high per write, which is the
-// edge the $F9DE poll consumes.
-sn76489_wrap sn1 (
-    .clock_i    (clk_20m),
-    .clock_en_i (sn_cen),
-    .res_n_i    (~reset),
-    .ce_n_i     (sn1_we_n),
-    .we_n_i     (sn1_we_n),
-    .ready_o    (sn1_ready),
-    .d_i        (pia1_pb_o),
-    .aout_o     (sn1_audio)
-);
-
-sn76489_wrap sn2 (
-    .clock_i    (clk_20m),
-    .clock_en_i (sn_cen),
-    .res_n_i    (~reset),
-    .ce_n_i     (sn2_we_n),
-    .we_n_i     (sn2_we_n),
-    .ready_o    (sn2_ready),
-    .d_i        (pia2_pb_o),
-    .aout_o     (sn2_audio)
-);
+assign sn_i[0].rst  = reset;
+assign sn_i[0].ce   = sn_cen;
+assign sn_i[0].wr_n = sn1_we_n;
+assign sn_i[0].cs_n = sn1_we_n;
+assign sn_i[0].din  = pia1_pb_o;
+assign sn_i[1].rst  = reset;
+assign sn_i[1].ce   = sn_cen;
+assign sn_i[1].wr_n = sn2_we_n;
+assign sn_i[1].cs_n = sn2_we_n;
+assign sn_i[1].din  = pia2_pb_o;
+assign sn1_ready    = sn_o[0].ready;
+assign sn2_ready    = sn_o[1].ready;
 
 // Non-Slither games keep the original constant, so their CB1 is unchanged.
 wire pia1_cb1 = is_slither ? sn1_ready : 1'b1;
@@ -514,9 +438,7 @@ assign pia_i[2].pa_pins = 1'b1;
 assign pia_i[2].ca1     = 1'b1;
 assign pia_i[2].ca2_i   = 1'b1;
 assign pia_i[2].pb_i    = in0_input;
-// DIAG-REVERT-2026-08-23: original below, uncomment to restore
-// assign pia_i[2].cb1     = 1'b1;
-assign pia_i[2].cb1     = pia1_cb1;   // DIAG: Slither SN76489 /READY handshake
+assign pia_i[2].cb1     = pia1_cb1;   // Slither: PSG 1 READY
 assign pia_i[2].cb2_i   = 1'b1;
 
 assign pia1_dout  = pia_o[2].dout;
@@ -543,9 +465,7 @@ assign pia_i[3].pa_pins = 1'b1;
 assign pia_i[3].ca1     = 1'b1;
 assign pia_i[3].ca2_i   = 1'b1;
 assign pia_i[3].pb_i    = 8'h00;
-// DIAG-REVERT-2026-08-23: original below, uncomment to restore
-// assign pia_i[3].cb1     = 1'b1;
-assign pia_i[3].cb1     = pia2_cb1;   // DIAG: Slither SN76489 /READY handshake
+assign pia_i[3].cb1     = pia2_cb1;   // Slither: PSG 2 READY
 assign pia_i[3].cb2_i   = 1'b1;
 
 assign pia2_dout  = pia_o[3].dout;
@@ -560,29 +480,23 @@ assign pia2_pb_oe = pia_o[3].pb_oe;
 //   Qix / Kram / SDungeon / etc:  24KB at $A000-$FFFF (loaded at ioctl 0..$5FFF)
 //   Zoo Keeper:                   32KB at $8000-$FFFF (loaded at ioctl 0..$7FFF)
 //
-// Array sized to 32KB unconditionally. Non-Zook games leave the low 8KB
+// Store sized to 32KB (dispatcher ROM block 0). Non-Zook games leave the high 8KB
 // unused (rom_cs never asserts there).
 // ---------------------------------------------------------------------------
-reg [7:0] data_rom [0:32767];                        // 32KB
-reg [7:0] rom_dout;
+wire [7:0] rom_dout;
 
 // CPU read addr:
 //   Qix:  $A000→0,    $FFFF→$5FFF  (cpu_A - $2000, low 15 bits)
 //   Zook: $8000→0,    $FFFF→$7FFF  (cpu_A[14:0])
 wire [14:0] rom_cpu_addr   = is_zookeep ? cpu_A[14:0]
                                         : (cpu_A[14:0] - 15'h2000);
-wire [14:0] rom_ioctl_addr = ioctl_addr[14:0];
-
-always @(posedge clk_20m) begin
-    if (ioctl_wr)
-        data_rom[rom_ioctl_addr] <= ioctl_data;
-    rom_dout <= data_rom[rom_cpu_addr];
-end
+assign rom_a    = {1'b0, rom_cpu_addr};
+assign rom_dout = rom_d;
 
 // ---------------------------------------------------------------------------
 // MC68705P3 coin-input microcontroller (MCU games only)
 //
-// Interface per MAME qix_m.cpp:
+// Interface (qix_m.cpp):
 //   - Data CPU writes PIA0 PB → MCU PA input  (coin_w)
 //   - MCU PA output           → PIA0 PB input (coin_r — already wired via
 //                                               pia0_pb_i mux above)
@@ -621,46 +535,29 @@ wire [7:0] pia2_pb_pin = pia2_pb_o | ~pia2_pb_oe;
 
 wire [7:0] mcu_pb_in = {3'b000, coin_input[7], coin_input[3:0]};
 wire [3:0] mcu_pc_in = {pia2_pb_pin[3], coin_input[6:4]};
-// EYY-MCU-IRQ-2026-08-04: the MCU IRQ must come from the PIA2 PB **output
-// latch**, not from the pull-up-modified PIN.
-//
-// MAME (`qix_m.cpp:185-197` coinctrl_w) asserts/clears M68705_IRQ_LINE from
-// `BIT(data,2)` — the value the data CPU WROTE. Our `pia2_pb_pin` ORs in
-// `~pia2_pb_oe`, so any bit configured as an INPUT reads back as 1. If EYY
-// leaves PIA2 DDRB bit 2 as an input, `mcu_irq_n` is then STUCK ASSERTED — and
-// the 68705's IRQ is EDGE-triggered, so the handler never re-runs. The MCU
-// therefore never rewrites port A, `mcu_porta_cache` never updates, and the
-// SERVICE (Test Advance) switch — which for MCU games reaches the data CPU only
-// via MCU port A — is dead. Matches the reported symptom exactly: EYY sits in
-// the NVRAM setup screen and no button advances it.
-//
-// Using the latch makes an undriven bit read 0 => IRQ deasserted => a real
-// 0->1 write produces a real edge, as on hardware and in MAME.
-// Original: wire mcu_irq_n = ~pia2_pb_pin[2];
+// MCU IRQ = PIA2 PB bit 2 as written (the output latch), not the pin: coinctrl_w drives the IRQ from the written value.
+// The pin view reads an input bit as 1 (pull-up), which would hold the edge-triggered IRQ asserted, so the MCU never
+// rewrites port A (Electric Yo-Yo then sits in the NVRAM setup screen: Test Advance reaches the data CPU only through
+// MCU port A). The latch reads an undriven bit as 0, so a 0->1 write is a real edge.
 wire       mcu_irq_n = ~pia2_pb_o[2];
 
 wire [7:0] mcu_pa_latch;
 wire       mcu_pa_wr_stb;
 
-mc68705p3 mcu (
-    .clk         (clk_20m),
-    .ce_4m       (mcu_ce_4m),
-    .reset       (reset),
-    .irq_n       (mcu_irq_n),
-    .pa_in       (mcu_pa_cmd),
-    .pa_out      (mcu_pa_out),
-    .pa_latch_out(mcu_pa_latch),
-    .pa_wr_stb   (mcu_pa_wr_stb),
-    .pb_in       (mcu_pb_in),
-    .pb_out      (),
-    .pb_ddr      (),
-    .pc_in       (mcu_pc_in),
-    .pc_out      (),
-    .pc_ddr      (),
-    .rom_wr      (mcu_rom_wr),
-    .rom_addr    (mcu_rom_addr),
-    .rom_data    (mcu_rom_data)
-);
+// MC68705P3 — chip pool slot mc68705p3_0 in the dispatcher (clk_20m)
+assign mcu_i.reset    = reset;
+assign mcu_i.ce_4m    = mcu_ce_4m;
+assign mcu_i.irq_n    = mcu_irq_n;
+assign mcu_i.pa_in    = mcu_pa_cmd;
+assign mcu_i.pb_in    = mcu_pb_in;
+assign mcu_i.pc_in    = mcu_pc_in;
+assign mcu_i.rom_wr   = mcu_rom_wr;
+assign mcu_i.rom_addr = mcu_rom_addr;
+assign mcu_i.rom_data = mcu_rom_data;
+
+assign mcu_pa_out     = mcu_o.pa_out;
+assign mcu_pa_latch   = mcu_o.pa_latch_out;
+assign mcu_pa_wr_stb  = mcu_o.pa_wr_stb;
 
 // ---------------------------------------------------------------------------
 // CPU data bus read mux — default $FF for open-bus / unimplemented reads

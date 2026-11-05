@@ -1,11 +1,11 @@
 // qix_display.sv — CRTC + Display Scanout Pipeline
 //
-// Instantiates mc6845, generates pixel clock and character clock enables,
+// Drives the pooled mc6845 CRTC, generates pixel clock and character clock enables,
 // drives display address into qix_vram display port, feeds pixel data
 // through qix_palette, and produces DE-gated RGB output.
 //
 // No CPU logic lives here.  The CPU bus signals (crtc_cs/rw/rs/di/do)
-// pass straight through to the mc6845 register interface.
+// pass straight through to the CRTC register interface.
 
 module qix_display (
     input         clk_20m,
@@ -53,7 +53,11 @@ module qix_display (
     input         crtc_rw,
     input         crtc_rs,
     input  [7:0]  crtc_di,
-    output [7:0]  crtc_do
+    output [7:0]  crtc_do,
+
+    // MC6845 CRTC: chip pool slot mc6845_0 in the dispatcher
+    output chip_pool_pkg::mc6845_i_t crtc_i,
+    input  chip_pool_pkg::mc6845_o_t crtc_o
 );
 
 // ---------------------------------------------------------------------------
@@ -79,33 +83,26 @@ always @(posedge clk_20m)
     else if (ce_pix)  pix_cnt <= pix_cnt + 3'd1;
 
 // ---------------------------------------------------------------------------
-// mc6845 CRTC (VHDL entity, Quartus mixed-language synthesis)
+// mc6845 CRTC — chip pool (crtc6845sv on clk_20m in the dispatcher)
 // ---------------------------------------------------------------------------
 wire hsync_raw, vsync_raw;
-wire hblank_raw, vblank_raw;   // H-CENTER-SIGNED-2026-09-23
+wire hblank_raw, vblank_raw;
 
-mc6845 crtc (
-    .CLOCK  (clk_20m),
-    .CLKEN  (clken_625k),
-    .nRESET (~reset),
-    // CPU bus
-    .ENABLE (crtc_cs),
-    .R_nW   (crtc_rw),
-    .RS     (crtc_rs),
-    .DI     (crtc_di),
-    .DO     (crtc_do),
-    // Display outputs
-    .VSYNC  (vsync_raw),
-    .HSYNC  (hsync_raw),
-    .VBLANK (vblank_raw),   // H-CENTER-SIGNED-2026-09-23: was (vblank), see Screen centering
-    .HBLANK (hblank_raw),   // was (hblank)
-    .DE     (crtc_de),
-    .CURSOR (),
-    .LPSTB  (1'b0),
-    // Memory address outputs
-    .MA     (crtc_ma),
-    .RA     (crtc_ra)
-);
+assign crtc_i.reset_n = ~reset;
+assign crtc_i.clken   = clken_625k;
+assign crtc_i.enable  = crtc_cs;
+assign crtc_i.r_nw    = crtc_rw;
+assign crtc_i.rs      = crtc_rs;
+assign crtc_i.di      = crtc_di;
+
+assign crtc_do    = crtc_o.dout;
+assign vsync_raw  = crtc_o.vsync;
+assign hsync_raw  = crtc_o.hsync;
+assign vblank_raw = crtc_o.vblank;   // raw blanks, see Screen centering
+assign hblank_raw = crtc_o.hblank;
+assign crtc_de    = crtc_o.de;
+assign crtc_ma    = crtc_o.ma;
+assign crtc_ra    = crtc_o.ra;
 
 // ---------------------------------------------------------------------------
 // Screen centering
@@ -114,18 +111,15 @@ mc6845 crtc (
 //   vsync_cpu always carries the undelayed pulse - the data CPU clocks frame
 //   timing off it and must not see the display adjustment.
 // ---------------------------------------------------------------------------
-// H-CENTER-SIGNED-2026-09-23: the OSD codes H Center as 0, -1..-7 (1-7), +7..+1 (8-14), but every
-// code was used as a sync delay, so + moved the picture left too. A sync pulse cannot be advanced,
-// so + now delays the picture (DE-gated RGB and both blanks) instead. 0/15 are untouched. Original:
-// wire [3:0] h_sel = h_center - 4'd1;
+// The OSD codes H Center as 0, -1..-7 (1-7), +7..+1 (8-14). - delays the sync pulses; a sync pulse cannot be
+// advanced, so + delays the picture (DE-gated RGB and both blanks) instead. 0 / 15 are untouched.
 wire [2:0] h_left  = (h_center >= 4'd1 && h_center <= 4'd7)  ? h_center[2:0]         : 3'd0;
 wire [2:0] h_right = (h_center >= 4'd8 && h_center <= 4'd14) ? (3'd7 - h_center[2:0]) : 3'd0;   // 8..14 -> +7..+1
 wire [3:0] h_sel = {1'b0, h_left} - 4'd1;
-// V-CENTER-SIGNED-2026-09-23: V Center now uses the same 0, -1..-7 (1-7), +7..+1 (8-14) coding.
+// V Center uses the same 0, -1..-7 (1-7), +7..+1 (8-14) coding.
 // - moves the picture up (vsync delayed n lines, as before); + moves it down, which needs vsync
 // EARLIER than the CRTC's: regenerated from a line counter. The game's own CRTC setup leaves only
 // ~1 line between vsync and the first visible row, so on a consumer CRT the top can sit in overscan.
-// Original: wire [3:0] v_sel = v_center - 4'd1;
 wire [2:0] v_up   = (v_center >= 4'd1 && v_center <= 4'd7)  ? v_center[2:0]         : 3'd0;
 wire [2:0] v_down = (v_center >= 4'd8 && v_center <= 4'd14) ? (3'd7 - v_center[2:0]) : 3'd0;   // 8..14 -> +7..+1
 wire [3:0] v_sel  = {1'b0, v_up} - 4'd1;
@@ -143,7 +137,6 @@ always @(posedge clk_20m) begin
     if (hs_fall) vs_dly <= {vs_dly[14:0], vsync_raw};
 end
 
-// assign hsync     = (h_center == 4'd0) ? hsync_raw : hs_dly[h_sel];   // H-CENTER-SIGNED original
 assign hsync     = (h_left == 3'd0) ? hsync_raw : hs_dly[h_sel];
 // Line counter from the raw vsync's leading edge; frame length and raw pulse width are measured, not assumed.
 reg        vsync_raw_d = 1'b0;
@@ -166,14 +159,13 @@ wire [10:0] vadv_pos  = {1'b0, line_cnt} + {8'd0, v_down};
 wire [10:0] vadv_wrap = (vadv_pos >= {1'b0, frame_lines}) ? vadv_pos - {1'b0, frame_lines} : vadv_pos;
 wire        vsync_adv = (vadv_wrap < {1'b0, vs_width});
 wire        vadv_ok   = (frame_lines > 10'd32) && (vs_width != 10'd0);   // measured at least one frame
-// assign vsync     = (v_center == 4'd0) ? vsync_raw : vs_dly[v_sel];   // V-CENTER-SIGNED original
 assign vsync     = (v_up != 3'd0)              ? vs_dly[v_sel] :
                    (v_down != 3'd0 && vadv_ok) ? vsync_adv     : vsync_raw;
 assign vsync_cpu = vsync_raw;
 
 // ---------------------------------------------------------------------------
 // Display address
-//   Formula (from MAME qix.cpp):
+//   Formula (qix.cpp):
 //     ((MA << 6) & 0xF800) | ((RA << 8) & 0x0700) | pix_cnt
 //   Expanded:
 //     bits [15:11] = MA[9:5]
@@ -191,17 +183,7 @@ assign pixel_index = display_data;
 // ---------------------------------------------------------------------------
 // RGB output — palette result, forced black outside active display area
 // ---------------------------------------------------------------------------
-// DEBUG: Force RGB output to non-black to verify video chain
-// Remove this after testing!
-// assign video_r = 8'hFF;
-// assign video_g = 8'h00;
-// assign video_b = 8'h00;
-
-// H-CENTER-SIGNED-2026-09-23: DE-gated RGB and blanks, delayed h_right pixels for a + setting.
-// Original (undelayed) below.
-// assign video_r = crtc_de ? rgb_r : 8'd0;
-// assign video_g = crtc_de ? rgb_g : 8'd0;
-// assign video_b = crtc_de ? rgb_b : 8'd0;
+// DE-gated RGB and blanks, delayed h_right pixels for a + setting.
 wire [25:0] vid_now = {hblank_raw, vblank_raw, crtc_de ? rgb_r : 8'd0, crtc_de ? rgb_g : 8'd0, crtc_de ? rgb_b : 8'd0};
 reg  [25:0] vid_dly [0:6];
 integer vd;

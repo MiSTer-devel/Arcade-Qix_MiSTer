@@ -50,10 +50,9 @@ module Qix_Video (
     input  [3:0]  h_center,
     input  [3:0]  v_center,
 
-    // ROM loader (MiSTer ioctl — pre-gated by address range in Qix.sv)
-    input  [24:0] ioctl_addr,
-    input  [7:0]  ioctl_data,
-    input         ioctl_wr,
+    // Video CPU ROM: ROM block 1 in the dispatcher (loaded there from the ROM download)
+    output [15:0] rom_a,
+    input  [7:0]  rom_d,
 
     // Hiscore / NVRAM interface (hs_address driven by hiscore module)
     input  [15:0] hs_address,
@@ -67,6 +66,10 @@ module Qix_Video (
     input  ram_pool_pkg::pram_o_t    nv_pr_o,
     output ram_pool_pkg::pram_i_t    vram_pr_i,   // RAM pool block 1: VRAM
     input  ram_pool_pkg::pram_o_t    vram_pr_o,
+    output ram_pool_pkg::pram_i_t    pal_pr_i,    // RAM pool block 4: palette RAM
+    input  ram_pool_pkg::pram_o_t    pal_pr_o,
+    output chip_pool_pkg::mc6845_i_t mc6845_i,    // chip pool: CRTC
+    input  chip_pool_pkg::mc6845_o_t mc6845_o,
 
     input         pause,
     input         flip,
@@ -287,7 +290,10 @@ qix_palette palette (
     .pixel_index (pixel_index),
     .rgb_r       (pal_r),
     .rgb_g       (pal_g),
-    .rgb_b       (pal_b)
+    .rgb_b       (pal_b),
+
+    .pr_i        (pal_pr_i),
+    .pr_o        (pal_pr_o)
 );
 
 // ---------------------------------------------------------------------------
@@ -328,7 +334,10 @@ qix_display display (
     .crtc_rw     (cpu_RnW),
     .crtc_rs     (cpu_A[0]),
     .crtc_di     (cpu_Dout),
-    .crtc_do     (crtc_do_w)
+    .crtc_do     (crtc_do_w),
+
+    .crtc_i      (mc6845_i),
+    .crtc_o      (mc6845_o)
 );
 
 assign crtc_vsync = vsync_cpu;
@@ -353,7 +362,7 @@ assign nvram_hs_dout  = nv_pr_o.b_q;
 assign hs_data_out = nvram_hs_dout;
 
 // ---------------------------------------------------------------------------
-// Video ROM — sized for the largest variant on the platform.
+// Video ROM (dispatcher ROM block 1) — sized for the largest variant on the platform.
 //
 //   Qix / non-banked: 24KB at $A000-$FFFF      (loaded ioctl $06000-$0BFFF)
 //   Zoo Keeper:       32KB total — 8KB bank0 + 16KB fixed + 8KB bank1
@@ -370,8 +379,7 @@ assign hs_data_out = nvram_hs_dout;
 //                       bank1 → $6000 + cpu_A[12:0]
 //   Zook $C000-$FFFF:   $2000 + cpu_A[13:0]
 // ---------------------------------------------------------------------------
-reg [7:0] vid_rom [0:32767];                         // 32KB
-reg [7:0] rom_dout;
+wire [7:0] rom_dout;
 
 // Zoo Keeper BRAM-index decode for $A000-$FFFF reads:
 //   $A000-$BFFF, bank 0  → BRAM $0000-$1FFF  (idx = {2'b00, cpu_A[12:0]})
@@ -392,16 +400,8 @@ end
 wire [14:0] rom_cpu_addr = is_zookeep ? zook_rom_addr
                                       : (cpu_A[14:0] - 15'h2000);
 
-// Non-Zook range starts at ioctl $06000 — subtract to base BRAM at 0.
-// Zoo Keeper range starts at ioctl $08000 — low 15 bits are already 0-based.
-wire [14:0] rom_ioctl_addr = is_zookeep ? ioctl_addr[14:0]
-                                        : (ioctl_addr[14:0] - 15'h6000);
-
-always @(posedge clk_20m) begin
-    if (ioctl_wr)
-        vid_rom[rom_ioctl_addr] <= ioctl_data;
-    rom_dout <= vid_rom[rom_cpu_addr];
-end
+assign rom_a    = {1'b0, rom_cpu_addr};
+assign rom_dout = rom_d;
 
 // ---------------------------------------------------------------------------
 // CPU data bus read mux — default $FF for open-bus / unimplemented reads

@@ -66,39 +66,22 @@ wire        cpu_we_any    = we | latch_we;
 // it stays correct even if the write strobe is a level and the RAM re-blends its
 // own output for the rest of the window.
 // ---------------------------------------------------------------------------
-// Two hard constraints, both learned the hard way on HW 2026-08-23:
+// Two hard constraints (both broke the hardware when ignored):
 //
-//  1. ⛔ NEVER drive data_a combinationally from cpu_q. That is a comb path out
-//     of the RAM straight back into its own write port; Quartus stops treating
-//     this as a real M10K and the framebuffer becomes coloured jagged lines on
-//     EVERY game. See [[BRAM read mux in data path defeats inference]].
-//     The old byte must come from a register.
+//  1. Never drive the write data combinationally from cpu_q. A comb path out of the RAM straight back into its own
+//     write port stops Quartus treating it as a real M10K, and the framebuffer becomes coloured jagged lines on
+//     every game. See [[BRAM read mux in data path defeats inference]]. The old byte must come from a register.
 //
-//  2. ⛔ NEVER just delay wren_a. cpu_wr is `cpu_E_fall & ~cpu_RnW` — a ONE-CLOCK
-//     pulse (Qix_Video.sv:96), not a held window. A clock later the 6809E has
-//     moved cpu_A to the next bus cycle and latch_we has dropped, so cpu_addr_mux
-//     changes source. A delayed write lands at the WRONG ADDRESS.
+//  2. Never just delay the write enable. cpu_wr is `cpu_E_fall & ~cpu_RnW`, a one-clock pulse (Qix_Video.sv), not a
+//     held window. A clock later the 6809E has moved cpu_A to the next bus cycle and latch_we has dropped, so
+//     cpu_addr_mux changes source: a delayed write lands at the wrong address.
 //
-// So the sequencer captures address and data at the write pulse and owns the RAM
-// port for four clocks. The CPU's next access is >=16 clk away (1.25 MHz core vs
-// 20 MHz fabric), so hijacking the port is free.
-//
-//   st0  write pulse -> capture addr + data
-//   st1  drive captured addr (read)
-//   st2  q_a valid -> rmw_old
-//   st3  drive captured addr, wren=1, data = blend
-// No state machine and no address mux is needed: the RAM is ALREADY reading the
-// write address for the whole bus cycle before the write lands.
-//   latched port - latch_re holds cpu_latch_full on address_a all cycle
-//   direct  port - latch_re/latch_we are 0, so address_a = cpu_direct_full
-// So cpu_q holds the OLD byte well before cpu_wr pulses at E-fall (16 clk in).
-// One registered copy of it is all the blend needs, and the write happens at its
-// natural time.
-//
-// ⛔ rmw_old MUST stay a register. Blending straight from cpu_q is a comb path
-// out of the RAM back into its own write port; Quartus stops inferring M10K and
-// the framebuffer becomes coloured jagged lines on EVERY game (HW 2026-08-23).
-// See [[BRAM read mux in data path defeats inference]].
+// No state machine and no address mux is needed: the RAM is already reading the write address for the whole bus
+// cycle before the write lands.
+//   latched port - latch_re holds cpu_latch_full on the address all cycle
+//   direct  port - latch_re / latch_we are 0, so the address = cpu_direct_full
+// So cpu_q holds the old byte well before cpu_wr pulses at E-fall (16 clk in). One registered copy of it (rmw_old,
+// constraint 1) is all the blend needs, and the write happens at its natural time.
 reg [7:0] rmw_old = 8'd0;
 always @(posedge clk) rmw_old <= cpu_q;
 

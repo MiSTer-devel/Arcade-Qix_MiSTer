@@ -11,7 +11,7 @@ module qix_palette (
     input  [9:0]      cpu_addr,
     input             cpu_we,
     input  [7:0]      cpu_din,
-    output reg [7:0]  cpu_dout,
+    output [7:0]      cpu_dout,
 
     // Bank select (written at $8800, bits [1:0])
     input             bank_we,
@@ -21,13 +21,16 @@ module qix_palette (
     input  [7:0]      pixel_index,   // raw VRAM byte from scanout
     output [7:0]      rgb_r,
     output [7:0]      rgb_g,
-    output [7:0]      rgb_b
+    output [7:0]      rgb_b,
+
+    // Palette RAM storage: RAM pool block 4 in the dispatcher
+    output ram_pool_pkg::pram_i_t pr_i,
+    input  ram_pool_pkg::pram_o_t pr_o
 );
 
 // ---------------------------------------------------------------------------
-// 1024-byte palette RAM (infers as M10K BRAM on Cyclone V)
+// 1024-byte palette RAM — RAM pool block 4 (port A = CPU, port B = display lookup)
 // ---------------------------------------------------------------------------
-reg [7:0] pal_ram [0:1023];
 
 // Active palette bank register
 reg [1:0] palette_bank;
@@ -38,19 +41,20 @@ always @(posedge clk) begin
 end
 
 // CPU read/write (synchronous)
-always @(posedge clk) begin
-    if (cpu_we)
-        pal_ram[cpu_addr] <= cpu_din;
-    cpu_dout <= pal_ram[cpu_addr];
-end
+assign pr_i.a_addr = {6'd0, cpu_addr};
+assign pr_i.a_d    = cpu_din;
+assign pr_i.a_we   = cpu_we;
+assign cpu_dout    = pr_o.a_q;
 
 // Display lookup: registered read from palette RAM
-reg [7:0] pal_out;
-always @(posedge clk)
-    pal_out <= pal_ram[{palette_bank, pixel_index}];
+wire [7:0] pal_out;
+assign pr_i.b_addr = {6'd0, palette_bank, pixel_index};
+assign pr_i.b_d    = 8'd0;
+assign pr_i.b_we   = 1'b0;
+assign pal_out     = pr_o.b_q;
 
 // ---------------------------------------------------------------------------
-// RRGGBBII → RGB conversion (from MAME qix.cpp)
+// RRGGBBII → RGB conversion (qix.cpp)
 // Index = {color_value[1:0], intensity[1:0]}
 // ---------------------------------------------------------------------------
 reg [7:0] lut [0:15];

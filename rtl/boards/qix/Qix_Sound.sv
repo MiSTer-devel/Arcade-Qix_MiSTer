@@ -31,16 +31,19 @@ module Qix_Sound (
     output signed [15:0] audio_l,
     output signed [15:0] audio_r,
 
-    // ROM loading (MiSTer ioctl — pre-gated by address range in Qix.sv)
-    input  [24:0] ioctl_addr,
-    input  [7:0]  ioctl_data,
-    input         ioctl_wr,
+    // Sound CPU ROM: ROM block 2 in the dispatcher
+    output [15:0] rom_a,
+    input  [7:0]  rom_d,
 
     input         pause,
 
     // Chip pool: the two sound PIAs live in the dispatcher
     output chip_pool_pkg::pia6821_i_t [1:0] pia_i,   // [0] sndPIA1  [1] sndPIA2
-    input  chip_pool_pkg::pia6821_o_t [1:0] pia_o
+    input  chip_pool_pkg::pia6821_o_t [1:0] pia_o,
+
+    // TMS5220 speech chip: pool tms5220rsws_0 (chips-repo tms5220 + tms5220_rsws, 640 kHz)
+    output chip_pool_pkg::tms5220rsws_i_t tms_i,
+    input  chip_pool_pkg::tms5220rsws_o_t tms_o
 );
 
 // ---------------------------------------------------------------------------
@@ -63,29 +66,15 @@ always @(posedge clk_20m)
 wire snd_rst = (snd_por != 2'b00);
 
 // Fractional clock enable: 3.6864 MHz cen from 20 MHz (exact average).
-// jt680x wants cen = CRYSTAL rate; its ucode has `cycle_factor: 4`, so the /4 to
-// the 6802's 921.6 kHz E clock happens inside the microcode, not here.
-// MAME: SOUND_CLOCK_OSC 7.3728 MHz, M6802(OSC/2) => 3.6864 MHz xtal, E = 921.6 kHz.
+// jt680x wants cen = the crystal rate; its ucode has `cycle_factor: 4`, so the /4 to the
+// 6802's 921.6 kHz E clock happens inside the microcode, not here.
+// Sound board: 7.3728 MHz oscillator, M6802 at OSC / 2 => 3.6864 MHz crystal, E = 921.6 kHz.
 //
-// ✅ 6802 MICROCODE ACTIVE (QIX-6802-UCODE-2026-08-04). This board's sound CPU is
-// an MC6802; jotego's jt680x ships 6801 ucode, which is the ENHANCED 6800 and ran
-// ~8% fast. hdl/6802.uc/.vh/_param.vh were generated with jtframe from a 6802
-// target whose per-opcode `cycles:` came from MAME's cycles_6800[].
-//
-// MEASURED (Verilator, real Qix sound ROM qq27.u27) before re-enabling:
-//   * write stream byte-identical to 6801 (136 writes, addr+data) => functionally
-//     equivalent; with IRQ active only the PUSHED PC differs, which is the
-//     expected result of an IRQ landing at a different instruction boundary.
-//   * 6802 is only 7.9% slower (9133 vs 8462 cen for the same 136 writes).
-//   * HW proved 15% slower is HARMLESS (6801 @ 3_133_440 ran with graphics OK),
-//     so a 7.9% slowdown cannot be the cause of anything.
-//   * fit resources identical: 1,659,364 mem bits, 223 RAM blocks, 57 DSP.
-//
-// ⚠️ CLOCK EXPERIMENTS TRIED ON HW AND FAILED — DO NOT RETRY:
-//    921_600   -> 4x too slow ("like someone farting"). The /4 is in the ucode.
-//    3_200_000 -> compensation for 6801 timing; obsolete now the ucode is 6802.
-//    3_133_440 -> the 15%-slowdown DISCRIMINATOR (graphics OK) — test, not a fix.
-// Full reasoning trail: Claude/qix_zookeeper_music_tempo_2026-06-16.md
+// The sound CPU is an MC6802: hdl/6802.uc / .vh / _param.vh are 6802 microcode generated with jtframe from the
+// 6800 per-opcode cycle table (jotego ships 6801 microcode, the enhanced 6800, which runs ~8% fast here).
+// Clock rates tried on hardware and rejected: 921_600 (4x slow: the /4 is in the microcode), 3_200_000
+// (compensated the 6801 timing), 3_133_440 (a 15%-slow test, not a fix).
+// History: vault Claude/qix_zookeeper_music_tempo_2026-06-16.md
 reg [24:0] snd_acc;
 wire snd_cen_raw = (snd_acc >= 25'd20_000_000);
 always @(posedge clk_20m) begin
@@ -109,36 +98,10 @@ wire rom_cs          = (snd_A >= 16'hD000);        // $D000-$FFFF (12KB)
 // ---------------------------------------------------------------------------
 // PIA enables
 // ---------------------------------------------------------------------------
-// NOTE (unresolved): jt680x's ucode has `cycle_factor: 4`, so one CPU bus cycle
-// is 4 `cen` pulses — meaning `snd_cen & cs` below enables each PIA ~4x per
-// access. The comment this replaced was written for the OLD cpu68 core, where
-// snd_cen really was one pulse per bus cycle. An attempt to make it one pulse
-// (commented out below) BLACK-SCREENED the hardware, so the 4x behaviour is
-// what actually works today. Leave it alone without a simulation.
-//
-// ❌ PIA-EN-1PER-BUSCYCLE-2026-08-04 REVERTED — HW: all games except ZK went
-// BLACK SCREEN and ZK lost sound. The bus_phase commit point was mis-aligned
-// against jt680x's internal 4-step bus cycle, so PIA accesses landed on a step
-// where address/data were not valid. DO NOT re-apply without a simulation that
-// establishes the correct phase. Reverted code kept below for reference:
-//   reg [1:0] bus_phase;
-//   always @(posedge clk_20m)
-//       if (snd_rst)      bus_phase <= 2'd0;
-//       else if (snd_cen) bus_phase <= bus_phase + 2'd1;
-//   wire bus_commit = snd_cen & (bus_phase == 2'd3);
-//   wire sndpia2_en = bus_commit & sndpia2_cs_addr;   (today: bus_commit would be the PIAs' ce)
-//   wire sndpia1_en = bus_commit & sndpia1_cs_addr;
-// The PIAs take snd_cen as their ce and the address decode as cs: they act on
-// snd_cen & cs, the same pulses as before.
-
-// ---------------------------------------------------------------------------
-// TMS5200 clock enable — 625 kHz from 20 MHz (/32)
-// Nominal chip rate is 640 kHz from RC oscillator (pot-adjustable);
-// 625 kHz is 2.3% slow — well within RC oscillator tolerance, inaudible.
-// ---------------------------------------------------------------------------
-reg [4:0] tms_div = 5'd0;
-always @(posedge clk_20m) tms_div <= tms_div + 5'd1;
-wire tms_cen = (tms_div == 5'd0) & ~pause;
+// The PIAs take snd_cen as ce and the address decode as cs. jt680x's ucode has `cycle_factor: 4`, so one CPU bus
+// cycle is 4 snd_cen pulses and each PIA is enabled ~4x per access. That is what works on hardware: a one-pulse-per-
+// bus-cycle version (a bus_phase counter committing on phase 3) black-screened every game but Zoo Keeper, which lost
+// its sound. Don't change it without a sim that establishes the right phase.
 
 // ---------------------------------------------------------------------------
 // 6802 internal RAM — 128 bytes ($0000-$007F)
@@ -237,8 +200,8 @@ assign snd_data_out   = sndpia1_pa_o;
 assign snd_irq_to_cpu = sndpia1_ca2_o;
 
 // ---------------------------------------------------------------------------
-// sndPIA2 ($2000-$3FFF) — TMS5200 speech PIA (Kram's "KRAM!" voice)
-// Wiring per Kram schematic:
+// sndPIA2 ($2000-$3FFF) — TMS5220 speech PIA. The chip is on the board per the schematic; no game is known to use it.
+// Wiring:
 //   port B ↔ D0-D7
 //   CA1    ← /INT    (TMS5200 interrupt)
 //   CA2    → /WS     (write strobe)
@@ -252,10 +215,10 @@ wire [7:0] sndpia2_pb_o,  sndpia2_pb_oe;
 wire       sndpia2_ca2_o, sndpia2_ca2_oe;
 wire       sndpia2_cb2_o, sndpia2_cb2_oe;
 
-// TMS5200 outputs
-wire [7:0]         tms_dout;
-wire               tms_intn, tms_rdyn;
-wire signed [13:0] tms_spkr;
+// TMS5220 outputs
+wire [7:0]         tms_dout = tms_o.d_out;
+wire               tms_intn = tms_o.int_n;
+wire               tms_rdyn = tms_o.ready_n;
 
 // Pool pia6821[1]. pa_pins = 0: port A output bits read back the latch.
 assign pia_i[1].rst     = snd_rst;
@@ -284,63 +247,37 @@ assign sndpia2_cb2_o  = pia_o[1].cb2_o & pia_o[1].cb2_oe;   // /RS to TMS5200
 assign sndpia2_cb2_oe = pia_o[1].cb2_oe;
 
 // ---------------------------------------------------------------------------
-// TMS5200 speech chip (using TMS5220 core — functionally equivalent for
-// the Speak External + data write path that Kram uses)
+// TMS5220 pins: /WS = CA2, /RS = CB2, data = port B (pin levels: 0 while a PIA line is an input).
+// The chip runs at the board's nominal 640 kHz (RC oscillator, pot-adjustable); pause holds it.
 // ---------------------------------------------------------------------------
-TMS5220 u_tms5200 (
-    .I_OSC    (clk_20m),
-    .I_ENA    (tms_cen),
-    .I_WSn    (sndpia2_ca2_o),
-    .I_RSn    (sndpia2_cb2_o),
-    .I_DATA   (1'b0),              // VSM serial in — unused on Kram
-    .I_TEST   (1'b0),
-    .I_DBUS   (sndpia2_pb_o),
-    .O_DBUS   (tms_dout),
-    .O_RDYn   (tms_rdyn),
-    .O_INTn   (tms_intn),
-    .O_M0     (),                  // VSM control — unused
-    .O_M1     (),
-    .O_ADD8   (),
-    .O_ADD4   (),
-    .O_ADD2   (),
-    .O_ADD1   (),
-    .O_ROMCLK (),                  // would clock VSM ROM; goes to TP6 only
-    .O_T11    (),
-    .O_IO     (),
-    .O_PRMOUT (),
-    .O_SPKR   (tms_spkr)
-);
+assign tms_i.reset = snd_rst;
+assign tms_i.pause = pause;
+assign tms_i.ws_n  = sndpia2_ca2_o;
+assign tms_i.rs_n  = sndpia2_cb2_o;
+assign tms_i.d_in  = sndpia2_pb_o;
 
-// IRQ to audio CPU: OR of all PIA interrupt outputs (active-high)
-// NOTE (2026-06-16): tried sndpia1-only (MAME-faithful) to fix ZK fast music —
-// DISPROVEN on HW, music unchanged. Reverted to baseline. sndpia2-in-sint is a
-// real MAME deviation but NOT the music-tempo cause; revisit only with speech.
+// IRQ to audio CPU: OR of all PIA interrupt outputs (active-high). The reference driver ORs only sndPIA1;
+// sndPIA1-only was tried on hardware and changed nothing. Revisit with speech.
 assign snd_irq = sndpia1_irqa | sndpia1_irqb | sndpia2_irqa | sndpia2_irqb;
 
 // ---------------------------------------------------------------------------
-// Audio ROM — 12KB ($D000-$FFFF) in 12KB BRAM
-// Loaded at ioctl_addr $0C000-$0EFFF (gated by Qix.sv).
+// Audio ROM — 12KB ($D000-$FFFF): dispatcher ROM block 2 (loaded there from the ROM download).
 // CPU read address: snd_A[13:0] - $1000  ($D000→0 .. $FFFF→$2FFF)
-// ioctl write address: ioctl_addr[13:0] (bits [13:0] of $0C000-$0EFFF = 0-$2FFF)
+// The read register updates only on a sound-CPU bus cycle (snd_cen_d && rom_cs); rom_hold keeps the
+// last value in between, so rom_dout matches a read-enabled BRAM output register clock for clock.
 // ---------------------------------------------------------------------------
-reg [7:0] snd_rom [0:12287];                          // 12KB
-reg [7:0] rom_dout;
+wire [13:0] rom_cpu_addr = snd_A[13:0] - 14'h1000;  // $D000→0
+reg        rom_rd_d;
+reg  [7:0] rom_hold;
+wire [7:0] rom_dout = rom_rd_d ? rom_d : rom_hold;
 
-wire [13:0] rom_cpu_addr   = snd_A[13:0] - 14'h1000;  // $D000→0
-wire [13:0] rom_ioctl_addr = ioctl_addr[13:0];
+assign rom_a = {2'b0, rom_cpu_addr};
 
-//always @(posedge clk_20m) begin
-//    if (ioctl_wr)
-//        snd_rom[rom_ioctl_addr] <= ioctl_data;
-//    rom_dout <= snd_rom[rom_cpu_addr];
-//end
-
-// ROM read/write — posedge; ioctl_wr takes priority, else CPU read (no VMA needed with jt680x)
-always @(posedge clk_20m)
-    if (ioctl_wr)
-        snd_rom[rom_ioctl_addr] <= ioctl_data;
-    else if (snd_cen_d && rom_cs)
-        rom_dout <= snd_rom[rom_cpu_addr];
+always @(posedge clk_20m) begin
+    rom_rd_d <= snd_cen_d && rom_cs;
+    if (rom_rd_d)
+        rom_hold <= rom_d;
+end
 
 // ---------------------------------------------------------------------------
 // CPU data bus read mux — default $FF for unmapped regions
@@ -366,7 +303,7 @@ assign snd_Din =
 //
 // vol_table maps a 4-bit index (from vol_data) to an 8-bit scale factor.
 //   Index 0 = full volume (255), index 15 = minimum (24).
-//   Derived from the parallel resistor network in qix_a.cpp (MAME).
+//   Derived from the parallel resistor network in qix_a.cpp.
 //
 // Scaled output = (dac_val × vol_scale) ÷ 256  (upper byte of 16-bit product)
 // MiSTer signed 16-bit: {scaled_byte, 8'h00} − 0x8000
@@ -393,13 +330,13 @@ wire [7:0] vol_r = vol_table[vol_data[3:0]];
 // drives the L/R volume network).
 //
 // - dac_centered : signed 9-bit (±128)  — unsigned 8-bit DAC centered at $80
-// - tms_scaled   : signed 9-bit (~±128) — TMS5200 14-bit SPKR >>> 6
-//   (starting point — tune on hardware. Real HW attenuates SPKR through
-//    LM324 op-amp stages before summing.)
+// - tms_scaled   : signed 9-bit (~±128) — TMS5220 16-bit sample / 256, rounded to nearest (the chip's idle
+//   sample -1 gives 0). Starting point: real HW attenuates SPKR through LM324 stages before summing.
 // - mixed        : signed 10-bit (±256 headroom)
 // - × vol 8-bit unsigned → signed 19-bit product, slice [17:2] for 16-bit
 wire signed [8:0]  dac_centered = $signed({1'b0, dac_val}) - 9'sh80;
-wire signed [8:0]  tms_scaled   = tms_spkr >>> 6;
+wire signed [16:0] tms_round    = $signed({tms_o.audio[15], tms_o.audio}) + 17'sd128;
+wire signed [8:0]  tms_scaled   = tms_round[16:8];
 wire signed [9:0]  mixed        = dac_centered + tms_scaled;
 
 wire signed [18:0] mix_l_scaled = mixed * $signed({2'b0, vol_l});

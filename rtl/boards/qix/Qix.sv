@@ -10,7 +10,7 @@
 //   - 1KB shared dual-port RAM (port A = data CPU, port B = video CPU)
 //   - FIRQ cross-signal routing between CPUs
 //   - Sound PIA signal routing between data CPU and audio board
-//   - ROM ioctl address-range dispatch to each subsystem
+//   - MCU EPROM download (ioctl index 2)
 //   - PIA input assembly
 //
 //============================================================================
@@ -68,16 +68,25 @@ module Qix (
     input  chip_pool_pkg::m6809r_o_t m6809r_0_o,
     output chip_pool_pkg::m6809r_i_t m6809r_1_i,
     input  chip_pool_pkg::m6809r_o_t m6809r_1_o,
+    output chip_pool_pkg::mc6845_i_t mc6845_0_i,
+    input  chip_pool_pkg::mc6845_o_t mc6845_0_o,
+    output chip_pool_pkg::mc68705p3_i_t mc68705p3_0_i,
+    input  chip_pool_pkg::mc68705p3_o_t mc68705p3_0_o,
     output chip_pool_pkg::pia6821_i_t [5:0] pia6821_i,   // [3:0] Qix_CPU (sndPIA0, PIA0-2), [5:4] Qix_Sound (sndPIA1-2)
     input  chip_pool_pkg::pia6821_o_t [5:0] pia6821_o,
-    output ram_pool_pkg::pram_i_t [1:0] pr_i,
-    input  ram_pool_pkg::pram_o_t [1:0] pr_o,
+    output chip_pool_pkg::sn76489_i_t [1:0] sn76489_i,   // Qix_CPU: Slither's two PSGs (PIA1 / PIA2 port B)
+    input  chip_pool_pkg::sn76489_o_t [1:0] sn76489_o,
+    output chip_pool_pkg::tms5220rsws_i_t tms5220rsws_0_i,   // Qix_Sound: TMS5220 on sndPIA2
+    input  chip_pool_pkg::tms5220rsws_o_t tms5220rsws_0_o,
+    output logic [2:0][15:0] rom_a,              // ROM block read addresses: [0] data CPU ROM  [1] video CPU ROM  [2] sound CPU ROM
+    input  logic [2:0] [7:0] rom_d,
+    output ram_pool_pkg::pram_i_t [4:0] pr_i,   // [0] NVRAM  [1] VRAM  [2] shared RAM  [3] data CPU local RAM  [4] palette RAM
+    input  ram_pool_pkg::pram_o_t [4:0] pr_o,
 
     input         pause,
     input         crt_flip,       // OSD 180 degree flip, XORed into the cocktail flip
     input  [3:0]  h_center,       // OSD screen centering
-    input  [3:0]  v_center,
-    output reg    shared_debug_led
+    input  [3:0]  v_center
 );
 
 // ---------------------------------------------------------------------------
@@ -102,7 +111,7 @@ end
 
 // ---------------------------------------------------------------------------
 // Shared 1KB dual-port RAM (port A = data CPU, port B = video CPU)
-// Explicit dpram_dc to guarantee M10K inference.
+// Storage: RAM pool block 2 in the dispatcher; its port B is clocked on ~clk_20m.
 // ---------------------------------------------------------------------------
 wire [9:0] cpu_sh_addr;
 wire [7:0] cpu_sh_din;
@@ -126,49 +135,19 @@ always @(posedge clk_20m) begin
     if (vid_sh_cs) vid_sh_addr_held <= vid_sh_addr;
 end
 
-dpram_dc #(.widthad_a(10)) shared_ram_inst (
-    .clock_a    (clk_20m),
-    .address_a  (cpu_sh_cs ? cpu_sh_addr : cpu_sh_addr_held),
-    .data_a     (cpu_sh_din),
-    .wren_a     (cpu_sh_we),
-    .q_a        (cpu_sh_dout),
-
-    .clock_b    (~clk_20m),
-    .address_b  (vid_sh_cs ? vid_sh_addr : vid_sh_addr_held),
-    .data_b     (vid_sh_din),
-    .wren_b     (vid_sh_we),
-    .q_b        (vid_sh_dout)
-);
+assign pr_i[2].a_addr = {6'd0, cpu_sh_cs ? cpu_sh_addr : cpu_sh_addr_held};
+assign pr_i[2].a_d    = cpu_sh_din;
+assign pr_i[2].a_we   = cpu_sh_we;
+assign pr_i[2].b_addr = {6'd0, vid_sh_cs ? vid_sh_addr : vid_sh_addr_held};
+assign pr_i[2].b_d    = vid_sh_din;
+assign pr_i[2].b_we   = vid_sh_we;
+assign cpu_sh_dout    = pr_o[2].a_q;
+assign vid_sh_dout    = pr_o[2].b_q;
 
 // ---------------------------------------------------------------------------
-// ROM ioctl address-range dispatch (concatenated ROM, all ioctl_index == 0)
-//
-// Layout differs by game because Zoo Keeper has larger data + video ROMs:
-//
-//   Non-Zoo Keeper (game_id != 4):
-//     $00000-$05FFF : data CPU  (24KB, 6× $1000 slots covering $A000-$FFFF)
-//     $06000-$0BFFF : video CPU (24KB, 6× $1000 slots covering $A000-$FFFF)
-//     $0C000-$0EFFF : audio CPU (12KB, covers $D000-$FFFF platform max)
-//
-//   Zoo Keeper (game_id == 4):
-//     $00000-$07FFF : data CPU  (32KB at CPU $8000-$FFFF)
-//     $08000-$0FFFF : video CPU (32KB: 8KB bank0 + 16KB fixed + 8KB bank1)
-//     $10000-$12FFF : audio CPU (12KB at CPU $D000-$FFFF, same as Qix)
+// Game flags (ROM download layout per game: dispatcher Shared ROM blocks)
 // ---------------------------------------------------------------------------
-wire is_zookeep_top = (game_id == 8'h04);
 wire is_slither_top = (game_id == 8'h05);
-
-wire cpu_ioctl_wr = ioctl_wr & (ioctl_index == 8'd0) & (
-    is_zookeep_top ?  (ioctl_addr < 25'h08000)
-                   :  (ioctl_addr < 25'h06000));
-
-wire vid_ioctl_wr = ioctl_wr & (ioctl_index == 8'd0) & (
-    is_zookeep_top ?  (ioctl_addr >= 25'h08000 && ioctl_addr < 25'h10000)
-                   :  (ioctl_addr >= 25'h06000 && ioctl_addr < 25'h0C000));
-
-wire snd_ioctl_wr = ioctl_wr & (ioctl_index == 8'd0) & (
-    is_zookeep_top ?  (ioctl_addr >= 25'h10000 && ioctl_addr < 25'h13000)
-                   :  (ioctl_addr >= 25'h0C000 && ioctl_addr < 25'h0F000));
 
 // MCU EPROM (MC68705P3, 2KB) loaded via ioctl_index == 2
 wire        mcu_ioctl_wr   = ioctl_wr & (ioctl_index == 8'd2);
@@ -185,124 +164,23 @@ wire cpu_firq_ack;       // data CPU accessed $8C01 (pulse)
 wire vid_firq_assert;    // video CPU accessed $8C00 (pulse)
 wire vid_firq_ack;       // video CPU accessed $8C01 (pulse)
 
+// FIRQ latches (U7 7474): set by the other CPU's $8C00 access, cleared by the own CPU's $8C01 access
 // ---------------------------------------------------------------------------
-// FIRQ delay configuration
-//   MODE 0: No delay (direct latch, current behavior)
-//   MODE 1: Half E-cycle delay (~400ns at 1.25 MHz E clock)
-//   MODE 2: 1 E-cycle delay (~800ns)
-//   MODE 3: 2 E-cycle delay (~1600ns)
-//   MODE 4: Alternating execution (MAME-style interleave)
-// Change this parameter and recompile to test each mode:
-// ---------------------------------------------------------------------------
-localparam FIRQ_DELAY_MODE = 0;  // <-- CHANGE THIS TO TEST: 0,1,2,3,4
-
 reg data_firq_latch;
 reg video_firq_latch;
 
-generate
-if (FIRQ_DELAY_MODE == 0) begin : firq_nodelay
-    // --- MODE 0: No delay (current behavior) ---
-    always @(posedge clk_20m) begin
-        if (reset) begin
-            data_firq_latch  <= 1'b0;
-            video_firq_latch <= 1'b0;
-        end else begin
-            if (cpu_firq_ack)         data_firq_latch <= 1'b0;
-            else if (vid_firq_assert) data_firq_latch <= 1'b1;
+always @(posedge clk_20m) begin
+    if (reset) begin
+        data_firq_latch  <= 1'b0;
+        video_firq_latch <= 1'b0;
+    end else begin
+        if (cpu_firq_ack)         data_firq_latch <= 1'b0;
+        else if (vid_firq_assert) data_firq_latch <= 1'b1;
 
-            if (vid_firq_ack)           video_firq_latch <= 1'b0;
-            else if (cpu_firq_assert)   video_firq_latch <= 1'b1;
-        end
-    end
-
-end else if (FIRQ_DELAY_MODE == 5) begin : firq_mame_scanline
-    // --- MODE 5: MAME-style end-of-phase FIRQs ---
-    reg data_firq_pending;
-    reg video_firq_pending;
-
-    always @(posedge clk_20m) begin
-        if (reset) begin
-            data_firq_pending  <= 1'b0;
-            video_firq_pending <= 1'b0;
-            data_firq_latch    <= 1'b0;
-            video_firq_latch   <= 1'b0;
-        end else begin
-            // --- Data CPU ---
-            if (vid_firq_assert)
-                data_firq_pending <= 1'b1;
-            if (cpu_E && data_firq_pending) begin
-                data_firq_latch  <= 1'b1;
-                data_firq_pending <= 1'b0;
-            end
-            if (cpu_firq_ack)
-                data_firq_latch <= 1'b0;
-
-            // --- Video CPU ---
-            if (cpu_firq_assert)
-                video_firq_pending <= 1'b1;
-            if (~cpu_E && video_firq_pending) begin
-                video_firq_latch   <= 1'b1;
-                video_firq_pending <= 1'b0;
-            end
-            if (vid_firq_ack)
-                video_firq_latch <= 1'b0;
-        end
-    end
-
-end else if (FIRQ_DELAY_MODE == 4) begin : firq_interleave
-    // --- MODE 4: Alternating execution (MAME-style) ---
-    // Use E clock phase to alternate: data CPU acts on E=1 half,
-    // video CPU acts on E=0 half. FIRQ only asserts when target
-    // CPU's phase is active, guaranteeing shared RAM write has settled.
-    always @(posedge clk_20m) begin
-        if (reset) begin
-            data_firq_latch  <= 1'b0;
-            video_firq_latch <= 1'b0;
-        end else begin
-            if (cpu_firq_ack)
-                data_firq_latch <= 1'b0;
-            else if (vid_firq_assert && cpu_E)
-                data_firq_latch <= 1'b1;
-
-            if (vid_firq_ack)
-                video_firq_latch <= 1'b0;
-            else if (cpu_firq_assert && ~cpu_E)
-                video_firq_latch <= 1'b1;
-        end
-    end
-
-end else begin : firq_delayed
-    // --- MODES 1-3: Delayed FIRQ assertion ---
-    // Shift register delays the assert pulse by N E-half-cycles
-    localparam DELAY_TAPS = (FIRQ_DELAY_MODE == 1) ? 8 :   // half E-cycle (~8 clk_20m ticks)
-                            (FIRQ_DELAY_MODE == 2) ? 16 :  // 1 E-cycle (~16 clk_20m ticks)
-                                                     32;   // 2 E-cycles (~32 clk_20m ticks)
-
-    reg [31:0] vid_assert_sr;
-    reg [31:0] cpu_assert_sr;
-
-    wire vid_assert_delayed = vid_assert_sr[DELAY_TAPS-1];
-    wire cpu_assert_delayed = cpu_assert_sr[DELAY_TAPS-1];
-
-    always @(posedge clk_20m) begin
-        if (reset) begin
-            vid_assert_sr <= 32'd0;
-            cpu_assert_sr <= 32'd0;
-            data_firq_latch  <= 1'b0;
-            video_firq_latch <= 1'b0;
-        end else begin
-            vid_assert_sr <= {vid_assert_sr[30:0], vid_firq_assert};
-            cpu_assert_sr <= {cpu_assert_sr[30:0], cpu_firq_assert};
-
-            if (cpu_firq_ack)           data_firq_latch <= 1'b0;
-            else if (vid_assert_delayed) data_firq_latch <= 1'b1;
-
-            if (vid_firq_ack)             video_firq_latch <= 1'b0;
-            else if (cpu_assert_delayed)  video_firq_latch <= 1'b1;
-        end
+        if (vid_firq_ack)           video_firq_latch <= 1'b0;
+        else if (cpu_firq_assert)   video_firq_latch <= 1'b1;
     end
 end
-endgenerate
 
 wire data_firq_n  = ~data_firq_latch;
 wire video_firq_n = ~video_firq_latch;
@@ -321,7 +199,7 @@ wire        snd_irq_snd2cpu;     // Qix_Sound sndPIA1 CA2 → Qix_CPU sndPIA0 CA
 wire        flip;                // Qix_CPU sndPIA0 CB2 → Qix_Video flip
 
 // ---------------------------------------------------------------------------
-// PIA input assembly — per-game, sourced from MAME qix.cpp INPUT_PORTS
+// PIA input assembly — per-game, from the qix.cpp INPUT_PORTS
 //
 // Joystick bit order from wrapper: p1_joystick = {R,L,D,U} = [3:2:1:0]
 // PIA byte bits [3:0] need L,D,R,U order = [2],[1],[3],[0]
@@ -390,8 +268,6 @@ always @(*) begin
             p1_pia = {p1_btn1, start_buttons[0], start_buttons[1], p1_btn2, 4'hF};
             // PIA2 port A is the trackball X axis, NOT player-2 buttons
             // (slither(machine_config&): m_pia[2]->readpa_handler = trak_r<0> = AN0).
-            // DIAG-REVERT-2026-08-23: original below, uncomment to restore
-            // p2_pia = {p2_btn1, 2'b11, p2_btn2, 4'hF};
             p2_pia = trak_x;
         end
 
@@ -409,22 +285,6 @@ always @(*) begin
 
     endcase
 end
-
-// DIAG-REVERT-2026-06-15: START1-AT-MUX probe → shared_debug_led → LED_USER (delete block to revert).
-// Latches when p1_pia[4] (ZK START1 mux output → PIA0 PA input pin) goes LOW. Samples the raw
-// mux node BEFORE the PIA, so it's free of all PIA register/DDR read-back semantics — it answers
-// only "does the 1P-start press reach the PIA input?". (Supersedes the Qix_CPU PIA-read probe;
-// dbg_start1_led_w is now left wired but unused.)
-wire dbg_start1_led_w;
-reg  dbg_p1pia4_latch = 1'b0;
-always @(posedge clk_20m) begin
-    if (reset)           dbg_p1pia4_latch <= 1'b0;
-    else if (~p1_pia[4]) dbg_p1pia4_latch <= 1'b1;
-end
-// FIX-VERIFY build: drive LED from the PIA-READ probe (Qix_CPU dbg_start1_led). It latches
-// when the 6809 reads PIA0 PA and gets bit4=0 — i.e. the PortA-pin fix worked and the CPU
-// finally sees START1. (dbg_p1pia4_latch above left in place but unused.)
-always @(*) shared_debug_led = dbg_start1_led_w;
 
 // ---------------------------------------------------------------------------
 // Qix_CPU — data CPU board
@@ -451,8 +311,8 @@ Qix_CPU cpu_board (
     .in0_input       (in0_pia),
     .p2_input        (p2_pia),
 
-    .sn1_audio       (sn1_audio),
-    .sn2_audio       (sn2_audio),
+    .sn_i            (sn76489_i),
+    .sn_o            (sn76489_o),
 
     .crtc_vsync      (crtc_vsync_out),
 
@@ -463,31 +323,32 @@ Qix_CPU cpu_board (
     .snd_irq_from_snd(snd_irq_snd2cpu),
     .flip_screen     (flip),
 
-    .ioctl_addr      (ioctl_addr),
-    .ioctl_data      (ioctl_data),
-    .ioctl_wr        (cpu_ioctl_wr),
+    .rom_a           (rom_a[0]),
+    .rom_d           (rom_d[0]),
 
     .mcu_rom_addr    (mcu_ioctl_addr),
     .mcu_rom_data    (ioctl_data),
     .mcu_rom_wr      (mcu_ioctl_wr),
+    .mcu_i           (mc68705p3_0_i),
+    .mcu_o           (mc68705p3_0_o),
 
     .m6809_i         (m6809r_0_i),
     .m6809_o         (m6809r_0_o),
     .pia_i           (pia6821_i[3:0]),
     .pia_o           (pia6821_o[3:0]),
+    .lr_pr_i         (pr_i[3]),
+    .lr_pr_o         (pr_o[3]),
 
     .pause           (pause),
-    .game_id         (game_id),
-    .dbg_start1_led  (dbg_start1_led_w)   // DIAG-REVERT-2026-06-15: START1-seen probe (delete this line + comma above to revert)
-//    .pause           (pause | vid_sh_cs)
+    .game_id         (game_id)
 );
 
 // ---------------------------------------------------------------------------
 // Qix_Video — video CPU board
 //
-// Video CPU reset is staggered ~2ms after data CPU to fix shared RAM race.
-// EYY (and potentially others) hang because the video CPU reads $8013
-// before the data CPU has initialised it. MAME fixes this with interleave=20.
+// Video CPU reset is staggered after the data CPU to fix a shared RAM race:
+// EYY (and potentially others) hang when the video CPU reads $8013
+// before the data CPU has initialised it.
 // At 20MHz, 2000 cycles ≈ 0.1ms gives the data CPU time to clear $03F3
 // before the video CPU boots and asserts its init FIRQ. The window must be
 // LESS than ~10000 cycles (when the data CPU sets $03F3=$80 for game-running).
@@ -524,9 +385,8 @@ Qix_Video video_board (
     .video_b         (video_b),
     .crtc_vsync      (crtc_vsync_out),
 
-    .ioctl_addr      (ioctl_addr),
-    .ioctl_data      (ioctl_data),
-    .ioctl_wr        (vid_ioctl_wr),
+    .rom_a           (rom_a[1]),
+    .rom_d           (rom_d[1]),
 
     .hs_address      (hs_address),
     .hs_data_out     (hs_data_out),
@@ -535,10 +395,14 @@ Qix_Video video_board (
 
     .m6809_i         (m6809r_1_i),
     .m6809_o         (m6809r_1_o),
+    .mc6845_i        (mc6845_0_i),
+    .mc6845_o        (mc6845_0_o),
     .nv_pr_i         (pr_i[0]),
     .nv_pr_o         (pr_o[0]),
     .vram_pr_i       (pr_i[1]),
     .vram_pr_o       (pr_o[1]),
+    .pal_pr_i        (pr_i[4]),
+    .pal_pr_o        (pr_o[4]),
 
     .pause           (pause),
 //    .pause           (pause | cpu_sh_cs),
@@ -555,11 +419,10 @@ Qix_Video video_board (
 // PIA2 port B (mono, summed). Every other game keeps the DAC board untouched.
 // ---------------------------------------------------------------------------
 wire signed [15:0] dac_audio_l, dac_audio_r;
-wire        [7:0]  sn1_audio, sn2_audio;   // signed 8-bit from each PSG
 
-wire signed [15:0] sn1_ext = {{8{sn1_audio[7]}}, sn1_audio};
-wire signed [15:0] sn2_ext = {{8{sn2_audio[7]}}, sn2_audio};
-wire signed [15:0] sn_mix  = (sn1_ext + sn2_ext) <<< 6;   // +/-256 -> +/-16384
+// Each PSG 0..1020, the real chip's level with its DC (MiSTer's audio DC blocker plays the coupling capacitor)
+wire        [11:0] sn_sum = {1'b0, sn76489_o[0].sound} + {1'b0, sn76489_o[1].sound};   // 0..2040
+wire signed [15:0] sn_mix = $signed({4'd0, sn_sum}) <<< 4;                            // 0..32640
 
 assign sound_l = is_slither_top ? sn_mix : dac_audio_l;
 assign sound_r = is_slither_top ? sn_mix : dac_audio_r;
@@ -581,13 +444,14 @@ Qix_Sound sound_board (
     .audio_l          (dac_audio_l),
     .audio_r          (dac_audio_r),
 
-    .ioctl_addr       (ioctl_addr),
-    .ioctl_data       (ioctl_data),
-    .ioctl_wr         (snd_ioctl_wr),
+    .rom_a            (rom_a[2]),
+    .rom_d            (rom_d[2]),
 
     .pause            (pause),
     .pia_i            (pia6821_i[5:4]),
-    .pia_o            (pia6821_o[5:4])
+    .pia_o            (pia6821_o[5:4]),
+    .tms_i            (tms5220rsws_0_i),
+    .tms_o            (tms5220rsws_0_o)
 );
 
 endmodule

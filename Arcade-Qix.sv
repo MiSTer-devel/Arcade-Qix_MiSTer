@@ -51,11 +51,9 @@ assign AUDIO_MIX = 0; // no mix, true stereo
 
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
-//assign LED_USER  = ioctl_download;
-assign LED_USER  = ioctl_download | shared_debug_led_w;
+assign LED_USER  = ioctl_download;
 assign BUTTONS = 0;
 
-wire shared_debug_led_w;
 
 ///////////////////////////////////////////////////
 
@@ -194,59 +192,11 @@ always @(posedge CLK_20M) begin
 end
 // 00=Qix  01=ComplexX  02=SpaceDungeon  03=Kram  04=ZooKeep  05=Slither  06=ElecYoYo
 
-wire pause_cpu;                     // CTL2-2026-10-25: declared here (was at the pause instance; the keyboard uses it)
+wire pause_cpu;                     // declared before the keyboard block, which uses it
 
 ///////////////////         Keyboard           //////////////////
 
-// CTL-2026-10-24: original block commented out below (replaced by rtl/mister_custom/controllers.sv modules after it)
-// reg btn_up       = 0;
-// reg btn_down     = 0;
-// reg btn_left     = 0;
-// reg btn_right    = 0;
-// reg btn_fire     = 0;
-// reg btn_fire2    = 0;
-// reg btn_coin1    = 0;
-// reg btn_coin2    = 0;
-// reg btn_1p_start = 0;
-// reg btn_2p_start = 0;
-// reg btn_pause    = 0;
-// reg btn_service  = 0;
-// reg btn_service2 = 0;
-// reg btn_service3 = 0;
-// reg btn_service4 = 0;
-//
-// wire pressed = ~ps2_key[9];
-// wire [7:0] code = ps2_key[7:0];
-// always @(posedge CLK_20M) begin
-// 	reg old_state;
-// 	old_state <= ps2_key[10];
-// 	if(old_state != ps2_key[10]) begin
-// 		case(code)
-// 			'h16: btn_1p_start <= pressed; // 1 = Player 1 Start
-// 			'h1E: btn_2p_start <= pressed; // 2 = Player 2 Start
-// 			'h2E: btn_coin1    <= pressed; // 5 = Coin Input 1
-// 			'h36: btn_coin2    <= pressed; // 6 = Coin Input 2
-// 			'h4D: btn_pause    <= pressed; // P = Pause
-// 			'h46: btn_service  <= pressed; // 9 = Test Advance
-// 			'h45: btn_service2 <= pressed; // 0 = Test Next Line
-// 			'h44: btn_service3 <= pressed; // O = Test Slew Up  
-// 			'h4B: btn_service4 <= pressed; // L = Test Slew Down
-//
-// 			'h75: btn_up       <= pressed; // up         = Up
-// 			'h72: btn_down     <= pressed; // down       = Down
-// 			'h6B: btn_left     <= pressed; // left       = Left
-// 			'h74: btn_right    <= pressed; // right      = Right
-// 			'h14: btn_fire     <= pressed; // ctrl       = Draw Slow
-// 			'h12: btn_fire2    <= pressed; // left shift = Draw Fast
-// 		endcase 
-// 	end
-// end
-// CTL-2026-10-24: keyboard via ctl_keyboard (keys act on press; the old ~ps2_key[9] acted on release)
-// CTL2-2026-10-25: original below (extra keys now in ctl_keyboard's table)
-// /* verilator lint_off UNUSED */
-// wire [12:0] kb;                    // kb[5] Alt / kb[11] T are not used by Qix
-// /* verilator lint_on UNUSED */
-// ctl_keyboard u_kb(.clk(CLK_20M), .ps2_key(ps2_key), .kb(kb));
+// Keyboard: ctl_keyboard (keys act on press)
 // kbx: [0] left Shift = Draw Fast, [1] 0 = Test Next Line, [2] O = Test Slew Up, [3] L = Test Slew Down
 /* verilator lint_off UNUSED */
 wire [12:0] kb;                    // kb[5] Alt / kb[11] T are not used by Qix
@@ -267,25 +217,6 @@ wire btn_coin1    = kb[8];   // 5 = Coin Input 1
 wire btn_coin2    = kb[9];   // 6 = Coin Input 2 (m_coin2 is never assigned, unchanged)
 wire btn_service  = kb[10];  // 9 = Test Advance
 wire btn_pause    = kb[12];  // P = Pause
-// CTL2-2026-10-25: original local extra-key block commented out below (now ctl_keyboard kbx)
-// // keys ctl_keyboard does not carry (left shift, 0, O, L): local, same on-press polarity
-// reg btn_fire2     = 0;
-// reg btn_service2  = 0;
-// reg btn_service3  = 0;
-// reg btn_service4  = 0;
-// reg kbx_old_state = 1'b0;
-// always @(posedge CLK_20M) begin
-// 	kbx_old_state <= ps2_key[10];
-// 	if (kbx_old_state != ps2_key[10]) begin
-// 		case (ps2_key[7:0])
-// 			8'h12: btn_fire2    <= ps2_key[9]; // left shift = Draw Fast
-// 			8'h45: btn_service2 <= ps2_key[9]; // 0 = Test Next Line
-// 			8'h44: btn_service3 <= ps2_key[9]; // O = Test Slew Up
-// 			8'h4B: btn_service4 <= ps2_key[9]; // L = Test Slew Down
-// 			default: ;
-// 		endcase
-// 	end
-// end
 wire btn_fire2    = kbx[0];  // left shift = Draw Fast
 wire btn_service2 = kbx[1];  // 0 = Test Next Line
 wire btn_service3 = kbx[2];  // O = Test Slew Up
@@ -312,14 +243,7 @@ wire m_btn2_p2  = btn_fire2     | joystick_1[5];
 // Right analog stick → 8 directional fire bits (threshold = 64/127)
 // joystick_r_analog_0[7:0]  = X axis (signed), positive = right
 // joystick_r_analog_0[15:8] = Y axis (signed), positive = down
-// CTL-2026-10-24: original block commented out below (replaced by rtl/mister_custom/controllers.sv modules after it)
-// wire signed [7:0] rstick_x = joystick_r_analog_0[7:0];
-// wire signed [7:0] rstick_y = joystick_r_analog_0[15:8];
-// wire r_fire_right = (rstick_x >  8'sd64);
-// wire r_fire_left  = (rstick_x < -8'sd64);
-// wire r_fire_down  = (rstick_y >  8'sd64);
-// wire r_fire_up    = (rstick_y < -8'sd64);
-// CTL-2026-10-24: right stick -> fire directions via ctl_stick_dirs (per axis past +-64, {U, D, L, R})
+// Right stick -> fire directions via ctl_stick_dirs (per axis past +-64, {U, D, L, R})
 wire [3:0] r_fire;
 ctl_stick_dirs #(.MODE(0), .THRESH(7'd64)) u_rstick(.stick(joystick_r_analog_0), .dir(r_fire));
 wire r_fire_up    = r_fire[3];
@@ -352,15 +276,13 @@ wire m_service3 = btn_service3  | joystick_0[17]; // J1 Test Slew Up
 wire m_service4 = btn_service4  | joystick_0[18]; // J1 Test Slew Down
 
 // PAUSE SYSTEM
-// CTL2-2026-10-25: original below (pause_cpu is now declared above the keyboard block)
-// wire pause_cpu;
 wire [23:0] rgb_out;
 pause #(8,8,8,20) pause
 (
 	.*,
 	.clk_sys(CLK_20M),
 	.user_button(m_pause),
-	.pause_request(1'b0),
+	.pause_request(1'b0),               // nothing holds the CPUs for NVRAM (real hardware never does)
 	.options(~status[26:25])
 );
 
@@ -410,34 +332,7 @@ arcade_video #(256,24) arcade_video
 	.fx(status[17:15])
 );
 
-// CTL-2026-10-24: original block commented out below (replaced by rtl/mister_custom/controllers.sv modules after it)
-// // Slither trackball: mouse deltas as they arrive, left stick (proportional) or d-pad once a frame.
-// // Port byte = counter scaled by Trackball Speed: Normal = MAME's 50%, Fast = 1:1, Slow = 1:4
-// reg  [9:0] trak_x_c = 10'd0, trak_y_c = 10'd0;
-// reg        mouse_tog = 1'b0, trak_vbl = 1'b0;
-// wire signed [7:0] ana_x = joystick_l_analog_0[7:0];
-// wire signed [7:0] ana_y = joystick_l_analog_0[15:8];
-// wire [9:0] trak_dx = (ana_x > 8'sd12 || ana_x < -8'sd12) ? {{5{ana_x[7]}}, ana_x[7:3]} :
-//                      m_right1 ? 10'd10 : m_left1 ? -10'd10 : 10'd0;
-// wire [9:0] trak_dy = (ana_y > 8'sd12 || ana_y < -8'sd12) ? -{{5{ana_y[7]}}, ana_y[7:3]} :    // stick up is negative
-//                      m_up1 ? 10'd10 : m_down1 ? -10'd10 : 10'd0;
-// wire [9:0] mouse_dx = {{2{ps2_mouse[4]}}, ps2_mouse[15:8]};
-// wire [9:0] mouse_dy = {{2{ps2_mouse[5]}}, ps2_mouse[23:16]};                                  // PS/2 Y is positive upward
-// always @(posedge CLK_20M) begin
-// 	mouse_tog <= ps2_mouse[24];
-// 	trak_vbl  <= vblank;
-// 	if (mouse_tog != ps2_mouse[24]) begin
-// 		trak_x_c <= trak_x_c + mouse_dx;
-// 		trak_y_c <= trak_y_c + mouse_dy;
-// 	end
-// 	else if (vblank & ~trak_vbl) begin
-// 		trak_x_c <= trak_x_c + trak_dx;
-// 		trak_y_c <= trak_y_c + trak_dy;
-// 	end
-// end
-// wire [7:0] trak_x = status[19] ? trak_x_c[9:2] : status[18] ? trak_x_c[7:0] : trak_x_c[8:1];
-// wire [7:0] trak_y = status[19] ? trak_y_c[9:2] : status[18] ? trak_y_c[7:0] : trak_y_c[8:1];
-// CTL-2026-10-24: Slither trackball via ctl_mouse + ctl_tick + ctl_trackball (10-bit counters, Y up +,
+// Slither trackball via ctl_mouse + ctl_tick + ctl_trackball (10-bit counters, Y up +,
 // Speed status[19:18]: Normal [8:1], Fast [7:0], Slow [9:2]; all sources on one clock are summed)
 wire       mouse_ev;
 wire [9:0] mouse_dx, mouse_dy;
@@ -447,14 +342,10 @@ wire [1:0] trak_dir;
 /* verilator lint_on UNUSED */
 ctl_mouse u_mouse(.clk(CLK_20M), .ps2_mouse(ps2_mouse), .ev(mouse_ev), .dx(mouse_dx), .dy(mouse_dy), .btn(mouse_btn));
 wire trak_tick;
-// CTL2-2026-10-25: original below (tick and trackball now stop while paused)
-// ctl_tick #(.MODE(0)) u_trak_tick(.clk(CLK_20M), .pause(1'b0), .vblank(vblank), .period(18'd0), .tick(trak_tick));
 ctl_tick #(.MODE(0)) u_trak_tick(.clk(CLK_20M), .pause(pause_cpu), .vblank(vblank), .period(18'd0), .tick(trak_tick));
 wire [7:0] trak_x, trak_y;
 ctl_trackball #(.CW(10), .OUT_W(8), .MOUSE_SH(0), .SPIN_SH(0), .STICK_RSH(3), .DPAD_STEP(10), .DZ(12), .LIVE_ANY(0)) u_trak
 (
-	// CTL2-2026-10-25: original below
-// 	.clk(CLK_20M), .reset(1'b0), .pause(1'b0), .rev(2'b10), .unit_sh(2'd0), .base_sh(4'd1),
 	.clk(CLK_20M), .reset(1'b0), .pause(pause_cpu), .rev(2'b10), .unit_sh(2'd0), .base_sh(4'd1),
 	.speed(status[19] ? 2'd2 : {1'b0, status[18]}),
 	.mouse_ev(mouse_ev), .mouse_dx(mouse_dx), .mouse_dy(mouse_dy), .spinner(9'd0), .quad_ce(2'b00), .quad_dir(2'b00),
@@ -512,7 +403,6 @@ qix_dispatcher QIX_inst
     .ioctl_index(ioctl_index),
 
 	.pause(pause_cpu),
-	.shared_debug_led(shared_debug_led_w),
 
 	.hs_address(nvram_address),
 	.hs_data_out(nvram_data_out),
@@ -520,15 +410,40 @@ qix_dispatcher QIX_inst
 	.hs_write(nvram_write)
 );
 
-// DIRECT NVRAM LOAD/SAVE
-wire nvram_download = ioctl_download && (ioctl_index == 8'd4);
-wire nvram_upload   = ioctl_upload && (ioctl_index == 8'd4);
-wire [15:0] nvram_address = ioctl_addr[15:0];
+// NVRAM load / autosave (1K, RAM pool block 0 behind the dispatcher's hiscore port)
+//   load (index 4): written straight into the game NVRAM through the hiscore port
+//   nvram.v keeps a copy: on OSD open it reads the game NVRAM through the same port and, if it changed and is not
+//   blank, requests a save when Autosave NVRAM (status[27]) is on. The save reads its copy.
+//   No CPU hold: its port is NVRAM port B, separate from the CPU's, so its pause_cpu output is left unconnected.
+//   OSD_STATUS reaches it only while the game runs (not in reset / download), 2 clocks after the reset release.
+wire        nvram_download = ioctl_download && (ioctl_index == 8'd4);
+wire  [9:0] nv_read_addr;
+wire [15:0] nvram_address = nvram_download ? ioctl_addr[15:0] : {6'd0, nv_read_addr};
 wire [7:0]  nvram_data_in = ioctl_dout;
 wire        nvram_write   = nvram_download && ioctl_wr;
 wire [7:0]  nvram_data_out;
 
-assign ioctl_din = nvram_data_out;
-assign ioctl_upload_req = status[27] & ~ioctl_download;
+reg   [1:0] nv_run_d = 2'b00;            // game running, 2 clocks late
+always @(posedge CLK_20M) nv_run_d <= {nv_run_d[0], ~reset};
+
+nvram #(.DUMPWIDTH(10)) nvram_save
+(
+	.clk(CLK_20M),
+	.paused(pause_cpu),
+	.reset(reset),
+	.autosave(status[27]),
+	.ioctl_upload(ioctl_upload),
+	.ioctl_upload_req(ioctl_upload_req),
+	.ioctl_download(ioctl_download),
+	.ioctl_wr(ioctl_wr),
+	.ioctl_addr(ioctl_addr),
+	.ioctl_index(ioctl_index),
+	.ioctl_din(ioctl_din),
+	.ioctl_dout(ioctl_dout),
+	.OSD_STATUS(OSD_STATUS & nv_run_d[1]),
+	.nvram_address(nv_read_addr),
+	.nvram_data_out(nvram_data_out),
+	.pause_cpu()                         // unused: no CPU hold
+);
 
 endmodule

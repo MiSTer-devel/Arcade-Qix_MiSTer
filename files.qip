@@ -19,25 +19,17 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister_custom/controllers.sv
 
 set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809is.v
 
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/mc68705p3.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/mc68705p3/mc68705p3.sv
 
-set_global_assignment -name VHDL_FILE rtl/cpu/m6800.vhd
-set_global_assignment -name VHDL_FILE rtl/cpu/mc6845.vhd
-set_global_assignment -name VHDL_FILE rtl/cpu/TMS5220/source/TMS5220.vhd
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/crtc6845sv/crtc6845sv_all.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/crtc6845sv/crtc6845sv_pool.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/sn76489sv/sn76489sv.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/tms5220/tms5220.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/tms5220/tms5220_rsws.sv
 
-# DPRAMSV-2026-10-25: VHDL dpram_dc replaced by the SystemVerilog one (same ports/generics + byteena); original:
-# set_global_assignment -name VHDL_FILE rtl/ram_rom/dpram_dc.vhd
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/dpram_dc.sv
 
 
-# SN76489 PSG (Slither only) - Arnim Laeuger, see rtl/custom/sn76489/COPYING
-set_global_assignment -name VHDL_FILE rtl/custom/sn76489/sn76489_clock_div.vhd
-set_global_assignment -name VHDL_FILE rtl/custom/sn76489/sn76489_latch_ctrl.vhd
-set_global_assignment -name VHDL_FILE rtl/custom/sn76489/sn76489_attenuator.vhd
-set_global_assignment -name VHDL_FILE rtl/custom/sn76489/sn76489_tone.vhd
-set_global_assignment -name VHDL_FILE rtl/custom/sn76489/sn76489_noise.vhd
-set_global_assignment -name VHDL_FILE rtl/custom/sn76489/sn76489_top.vhd
-set_global_assignment -name VHDL_FILE rtl/custom/sn76489_wrap.vhd
 
 set_global_assignment -name VERILOG_FILE rtl/sound/jt680x/hdl/jt680x.v
 set_global_assignment -name VERILOG_FILE rtl/sound/jt680x/hdl/jt680x_ctrl.v
