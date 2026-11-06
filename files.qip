@@ -31,8 +31,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/dpram_dc.sv
 
 
 
-set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x_6802/jt680x.v
-set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x_6802/jt680x_ctrl.v
-set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x_6802/jt680x_alu.v
-set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x_6802/jt680x_regs.v
+set_global_assignment -name VERILOG_FILE rtl/rodimus/jt680x_6802/jt680x.v
+set_global_assignment -name VERILOG_FILE rtl/rodimus/jt680x_6802/jt680x_ctrl.v
+set_global_assignment -name VERILOG_FILE rtl/rodimus/jt680x_6802/jt680x_alu.v
+set_global_assignment -name VERILOG_FILE rtl/rodimus/jt680x_6802/jt680x_regs.v
 

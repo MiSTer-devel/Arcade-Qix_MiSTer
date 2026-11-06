@@ -56,7 +56,7 @@ module qix_dispatcher
 
 /////////////////////////////  Shared CPU / sound chip pool  /////////////////////////////
 
-//   m6809r_0  data CPU     m6809r_1  video CPU
+//   m6809r_0  data CPU     m6809r_1  video CPU     m6800_0  sound CPU (MC6802: chips-repo jt680x_6802)
 //   pia6821[0] sndPIA0  [1] PIA0  [2] PIA1  [3] PIA2  (data CPU board)   [4] sndPIA1  [5] sndPIA2  (sound board)
 //   mc6845_0  CRTC (video board)   mc68705p3_0  coin / input MCU (data CPU board, MCU games)
 //   sn76489[0..1]  Slither's two PSGs (data CPU board; chips-repo sn76489sv, VARIANT 0 = SN76489)
@@ -127,6 +127,15 @@ generate
         );
     end
 endgenerate
+
+chip_pool_pkg::m6800_i_t m6800_0_i;
+chip_pool_pkg::m6800_o_t m6800_0_o;
+jt680x m6800_0
+(
+    .rst(m6800_0_i.rst), .clk(clk_20m), .cen(m6800_0_i.cen), .wr(m6800_0_o.wr), .addr(m6800_0_o.a), .din(m6800_0_i.din),
+    .dout(m6800_0_o.dout), .ext_halt(1'b0), .ba(), .irq(m6800_0_i.irq), .nmi(m6800_0_i.nmi),
+    .irq_icf(1'b0), .irq_ocf(1'b0), .irq_tof(1'b0), .irq_sci(1'b0), .irq_cmf(1'b0), .irq2(1'b0)
+);
 
 genvar si;
 generate
@@ -292,6 +301,8 @@ Qix qix
     .sn76489_o(sn76489_o),
     .tms5220rsws_0_i(tms5220rsws_0_i),
     .tms5220rsws_0_o(tms5220rsws_0_o),
+    .m6800_0_i(m6800_0_i),
+    .m6800_0_o(m6800_0_o),
     .rom_a(rom_a),
     .rom_d(rom_d),
     .pr_i(pool_i),

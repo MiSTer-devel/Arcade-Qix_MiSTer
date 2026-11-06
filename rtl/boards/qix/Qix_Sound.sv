@@ -43,7 +43,11 @@ module Qix_Sound (
 
     // TMS5220 speech chip: pool tms5220rsws_0 (chips-repo tms5220 + tms5220_rsws, 640 kHz)
     output chip_pool_pkg::tms5220rsws_i_t tms_i,
-    input  chip_pool_pkg::tms5220rsws_o_t tms_o
+    input  chip_pool_pkg::tms5220rsws_o_t tms_o,
+
+    // MC6802 sound CPU: pool m6800_0 (chips-repo jt680x_6802)
+    output chip_pool_pkg::m6800_i_t cpu_i,
+    input  chip_pool_pkg::m6800_o_t cpu_o
 );
 
 // ---------------------------------------------------------------------------
@@ -53,7 +57,7 @@ wire [15:0] snd_A;
 wire [7:0]  snd_Dout;
 wire [7:0]  snd_Din;           // assigned at bottom by read mux
 wire        snd_rw;            // 1 = read, 0 = write (kept for PIA compatibility)
-wire        snd_wr;            // active-high write strobe from jt680x
+wire        snd_wr;            // active-high write strobe from the CPU
 
 // One-shot power-on reset for cpu68. Fires once at startup to ensure
 // the CPU fetches the reset vector. Uses a 2-bit counter with explicit
@@ -70,9 +74,9 @@ wire snd_rst = (snd_por != 2'b00);
 // 6802's 921.6 kHz E clock happens inside the microcode, not here.
 // Sound board: 7.3728 MHz oscillator, M6802 at OSC / 2 => 3.6864 MHz crystal, E = 921.6 kHz.
 //
-// The sound CPU is an MC6802: jotego's jt680x, unmodified, in rtl/cpu/jt680x_6802/ with its 6801.vh / _param.vh /
-// .uc generated as 6802 microcode (ucode/6802.yaml: the 6800 per-opcode cycle table; ucode/gen.sh). jotego's own
-// 6801 microcode (the enhanced 6800) runs ~8% fast here.
+// The sound CPU is an MC6802: chips-repo jt680x_6802 = jotego's jt680x, unmodified, with its 6801.vh / _param.vh /
+// .uc generated as 6802 microcode (the 6800 per-opcode cycle table). jotego's own 6801 microcode (the enhanced
+// 6800) runs ~8% fast here.
 // Clock rates tried on hardware and rejected: 921_600 (4x slow: the /4 is in the microcode), 3_200_000
 // (compensated the 6801 timing), 3_133_440 (a 15%-slow test, not a fix).
 // History: vault Claude/qix_zookeeper_music_tempo_2026-06-16.md
@@ -122,38 +126,20 @@ always @(posedge clk_20m)
         internal_ram[snd_A[6:0]] <= snd_Dout;
 
 // ---------------------------------------------------------------------------
-// jt680x — MC6802 compatible audio CPU (jotego, posedge-clocked with cen)
-//   rst      : active-high synchronous reset
-//   cen      : clock enable (advances CPU one cycle when high)
-//   wr       : active-high write strobe
-//   addr     : 16-bit address bus (always valid)
-//   irq      : active-high IRQ
-//   nmi      : active-high NMI — tie low (not used by Qix)
-//   ext_halt : 6301 bus sharing — tie low
-//   irq_icf/ocf/tof/sci/cmf/irq2 : 6801/6301-specific — tie low for 6802
+// MC6802 sound CPU: pool m6800_0 (jt680x: posedge-clocked with cen, active-high wr, 6801 on-chip interrupts and
+// ext_halt tied in the dispatcher). NMI is not used by the board.
 // ---------------------------------------------------------------------------
 wire snd_irq;
 assign snd_rw = ~snd_wr;  // keep snd_rw for PIA compatibility
 
-jt680x audio_cpu (
-    .rst        (snd_rst),
-    .clk        (clk_20m),
-    .cen        (snd_cen),
-    .wr         (snd_wr),
-    .addr       (snd_A),
-    .din        (snd_Din),
-    .dout       (snd_Dout),
-    .ext_halt   (1'b0),
-    .ba         (),
-    .irq        (snd_irq),
-    .nmi        (1'b0),
-    .irq_icf    (1'b0),
-    .irq_ocf    (1'b0),
-    .irq_tof    (1'b0),
-    .irq_sci    (1'b0),
-    .irq_cmf    (1'b0),
-    .irq2       (1'b0)
-);
+assign cpu_i.rst = snd_rst;
+assign cpu_i.cen = snd_cen;
+assign cpu_i.irq = snd_irq;
+assign cpu_i.nmi = 1'b0;
+assign cpu_i.din = snd_Din;
+assign snd_A     = cpu_o.a;
+assign snd_Dout  = cpu_o.dout;
+assign snd_wr    = cpu_o.wr;
 
 // ---------------------------------------------------------------------------
 // sndPIA1 ($4000-$7FFF) — main sound PIA

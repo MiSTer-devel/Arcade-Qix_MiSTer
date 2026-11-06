@@ -78,6 +78,8 @@ module Qix (
     input  chip_pool_pkg::sn76489_o_t [1:0] sn76489_o,
     output chip_pool_pkg::tms5220rsws_i_t tms5220rsws_0_i,   // Qix_Sound: TMS5220 on sndPIA2
     input  chip_pool_pkg::tms5220rsws_o_t tms5220rsws_0_o,
+    output chip_pool_pkg::m6800_i_t m6800_0_i,               // Qix_Sound: MC6802 sound CPU
+    input  chip_pool_pkg::m6800_o_t m6800_0_o,
     output logic [2:0][15:0] rom_a,              // ROM block read addresses: [0] data CPU ROM  [1] video CPU ROM  [2] sound CPU ROM
     input  logic [2:0] [7:0] rom_d,
     output ram_pool_pkg::pram_i_t [4:0] pr_i,   // [0] NVRAM  [1] VRAM  [2] shared RAM  [3] data CPU local RAM  [4] palette RAM
@@ -451,7 +453,9 @@ Qix_Sound sound_board (
     .pia_i            (pia6821_i[5:4]),
     .pia_o            (pia6821_o[5:4]),
     .tms_i            (tms5220rsws_0_i),
-    .tms_o            (tms5220rsws_0_o)
+    .tms_o            (tms5220rsws_0_o),
+    .cpu_i            (m6800_0_i),
+    .cpu_o            (m6800_0_o)
 );
 
 endmodule

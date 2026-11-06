@@ -265,6 +265,8 @@ wire [7:0] pia0_pb_o, pia0_pb_oe;
 // Starts at 0xFF (all inactive, active-low) so the 6809 sees no spurious coins / credits before the MCU's
 // first IRQ handler.
 wire [7:0] mcu_pa_out;
+wire [7:0] mcu_pa_latch;         // MC68705P3 port A latch / write strobe (mc68705p3_0, below)
+wire       mcu_pa_wr_stb;
 reg  [7:0] mcu_porta_cache = 8'hFF;
 
 always @(posedge clk_20m) begin
@@ -375,6 +377,7 @@ always @(posedge clk_20m) begin
 end
 
 wire sn1_ready, sn2_ready;
+wire [7:0] pia2_pb_o, pia2_pb_oe;   // PIA2 port B (pool pia6821[3], below): PSG 2 data, MCU control
 
 // Per PSG: 8 clk data setup, then /WE low until READY is high (the PSG drops it the clock after it takes the write),
 // with a ~2k-clk timeout so a PSG that never answers cannot wedge the CPU's CB1 poll.
@@ -451,7 +454,6 @@ assign pia1_pb_o  = pia_o[2].pb_o & pia_o[2].pb_oe;   // pin level: 0 while an i
 // ---------------------------------------------------------------------------
 wire [7:0] pia2_dout;
 wire       pia2_irqa, pia2_irqb;
-wire [7:0] pia2_pb_o, pia2_pb_oe;
 
 // Pool pia6821[3]. pa_pins = 1: port A reads its pins, output bits too; the pins are the switches wired-AND the outputs.
 assign pia_i[3].rst     = reset;
@@ -541,8 +543,6 @@ wire [3:0] mcu_pc_in = {pia2_pb_pin[3], coin_input[6:4]};
 // MCU port A). The latch reads an undriven bit as 0, so a 0->1 write is a real edge.
 wire       mcu_irq_n = ~pia2_pb_o[2];
 
-wire [7:0] mcu_pa_latch;
-wire       mcu_pa_wr_stb;
 
 // MC68705P3 — chip pool slot mc68705p3_0 in the dispatcher (clk_20m)
 assign mcu_i.reset    = reset;
