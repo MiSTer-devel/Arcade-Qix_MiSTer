@@ -70,8 +70,9 @@ wire snd_rst = (snd_por != 2'b00);
 // 6802's 921.6 kHz E clock happens inside the microcode, not here.
 // Sound board: 7.3728 MHz oscillator, M6802 at OSC / 2 => 3.6864 MHz crystal, E = 921.6 kHz.
 //
-// The sound CPU is an MC6802: hdl/6802.uc / .vh / _param.vh are 6802 microcode generated with jtframe from the
-// 6800 per-opcode cycle table (jotego ships 6801 microcode, the enhanced 6800, which runs ~8% fast here).
+// The sound CPU is an MC6802: jotego's jt680x, unmodified, in rtl/cpu/jt680x_6802/ with its 6801.vh / _param.vh /
+// .uc generated as 6802 microcode (ucode/6802.yaml: the 6800 per-opcode cycle table; ucode/gen.sh). jotego's own
+// 6801 microcode (the enhanced 6800) runs ~8% fast here.
 // Clock rates tried on hardware and rejected: 921_600 (4x slow: the /4 is in the microcode), 3_200_000
 // (compensated the 6801 timing), 3_133_440 (a 15%-slow test, not a fix).
 // History: vault Claude/qix_zookeeper_music_tempo_2026-06-16.md
