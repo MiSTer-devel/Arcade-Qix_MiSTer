@@ -82,6 +82,7 @@ wire        cpu_we_any    = we | latch_we;
 //   direct  port - latch_re / latch_we are 0, so the address = cpu_direct_full
 // So cpu_q holds the old byte well before cpu_wr pulses at E-fall (16 clk in). One registered copy of it (rmw_old,
 // constraint 1) is all the blend needs, and the write happens at its natural time.
+wire [7:0] cpu_q;                // VRAM port A read data (pool block, below)
 reg [7:0] rmw_old = 8'd0;
 always @(posedge clk) rmw_old <= cpu_q;
 
@@ -98,7 +99,6 @@ wire [15:0] disp_addr_eff = flip ? (display_addr ^ 16'hFFFF) : display_addr;
 //   Port A: CPU read/write
 //   Port B: Display read-only
 // ---------------------------------------------------------------------------
-wire [7:0] cpu_q;
 wire [7:0] disp_q;
 
 assign pr_i.a_addr = cpu_addr_eff;

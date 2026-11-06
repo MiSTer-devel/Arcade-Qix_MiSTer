@@ -51,7 +51,6 @@ assign AUDIO_MIX = 0; // no mix, true stereo
 
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
-assign LED_USER  = ioctl_download;
 assign BUTTONS = 0;
 
 
@@ -93,6 +92,10 @@ localparam CONF_STR = {
 
 wire        forced_scandoubler;
 wire  [1:0] buttons;
+wire CLK_40M;                        // pll outclk_0 / outclk_1 (CLOCKS, below)
+wire CLK_20M;
+wire locked;
+
 wire [31:0] status;
 wire [10:0] ps2_key;
 
@@ -104,6 +107,7 @@ wire        ioctl_wr;
 wire [24:0] ioctl_addr;
 wire  [7:0] ioctl_dout;
 wire  [7:0] ioctl_din;
+assign LED_USER  = ioctl_download;
 
 wire [31:0] joystick_0, joystick_1;
 wire [15:0] joystick_l_analog_0;
@@ -149,9 +153,6 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 );
 
 ////////////////////   CLOCKS   ///////////////////
-wire CLK_40M;
-wire CLK_20M;
-wire locked;
 
 wire [63:0] reconfig_to_pll;
 wire [63:0] reconfig_from_pll;
@@ -353,6 +354,19 @@ ctl_trackball #(.CW(10), .OUT_W(8), .MOUSE_SH(0), .SPIN_SH(0), .STICK_RSH(3), .D
 	.x(trak_x), .y(trak_y), .dir(trak_dir)
 );
 
+// NVRAM load / autosave (1K, RAM pool block 0 behind the dispatcher's hiscore port)
+//   load (index 4): written straight into the game NVRAM through the hiscore port
+//   nvram.v keeps a copy: on OSD open it reads the game NVRAM through the same port and, if it changed and is not
+//   blank, requests a save when Autosave NVRAM (status[27]) is on. The save reads its copy.
+//   No CPU hold: its port is NVRAM port B, separate from the CPU's, so its pause_cpu output is left unconnected.
+//   OSD_STATUS reaches it only while the game runs (not in reset / download), 2 clocks after the reset release.
+wire        nvram_download = ioctl_download && (ioctl_index == 8'd4);
+wire  [9:0] nv_read_addr;
+wire [15:0] nvram_address = nvram_download ? ioctl_addr[15:0] : {6'd0, nv_read_addr};
+wire [7:0]  nvram_data_in = ioctl_dout;
+wire        nvram_write   = nvram_download && ioctl_wr;
+wire [7:0]  nvram_data_out;
+
 //Instantiate Qix top-level platform module
 qix_dispatcher QIX_inst
 (
@@ -410,19 +424,7 @@ qix_dispatcher QIX_inst
 	.hs_write(nvram_write)
 );
 
-// NVRAM load / autosave (1K, RAM pool block 0 behind the dispatcher's hiscore port)
-//   load (index 4): written straight into the game NVRAM through the hiscore port
-//   nvram.v keeps a copy: on OSD open it reads the game NVRAM through the same port and, if it changed and is not
-//   blank, requests a save when Autosave NVRAM (status[27]) is on. The save reads its copy.
-//   No CPU hold: its port is NVRAM port B, separate from the CPU's, so its pause_cpu output is left unconnected.
-//   OSD_STATUS reaches it only while the game runs (not in reset / download), 2 clocks after the reset release.
-wire        nvram_download = ioctl_download && (ioctl_index == 8'd4);
-wire  [9:0] nv_read_addr;
-wire [15:0] nvram_address = nvram_download ? ioctl_addr[15:0] : {6'd0, nv_read_addr};
-wire [7:0]  nvram_data_in = ioctl_dout;
-wire        nvram_write   = nvram_download && ioctl_wr;
-wire [7:0]  nvram_data_out;
-
+// NVRAM load / autosave: nets above the board instance; nvram.v here
 reg   [1:0] nv_run_d = 2'b00;            // game running, 2 clocks late
 always @(posedge CLK_20M) nv_run_d <= {nv_run_d[0], ~reset};
 
